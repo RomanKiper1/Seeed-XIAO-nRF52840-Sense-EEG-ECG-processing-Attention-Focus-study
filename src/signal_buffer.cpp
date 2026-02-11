@@ -13,7 +13,8 @@ void SignalBuffer::clear() {
 }
 
 /**
- * @brief Push a new sample into the buffer (stub).
+ * @brief Push a new sample into the buffer (stub).x
+ 
  */
 void SignalBuffer::pushSample(const SampleFrame& sample) {
     (void)sample;

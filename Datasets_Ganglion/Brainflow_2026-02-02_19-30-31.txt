@@ -1,0 +1,117 @@
+[2026-02-02 19:30:31.069] [board_logger] [info] incoming json: {"ip_address":"","ip_address_aux":"","ip_address_anc":"","mac_address":"","serial_port":"","ip_port":0,"ip_port_aux":0,"ip_port_anc":0,"ip_protocol":0,"other_info":"","timeout":0,"serial_number":"Ganglion-a88a","file":"","file_aux":"","file_anc":"","master_board":-100}
+[2026-02-02 19:30:31.069] [board_logger] [trace] Board object created 46
+[2026-02-02 19:30:31.069] [board_logger] [info] Use timeout for discovery: 5
+[2026-02-02 19:30:31.069] [board_logger] [debug] use dyn lib: C:\Users\musta\AppData\Local\Temp\jna-104263544\simpleble-c.dll
+[2026-02-02 19:30:32.135] [board_logger] [trace] Scan started
+[2026-02-02 19:30:32.220] [board_logger] [trace] address 7a:bc:2b:51:c9:88
+[2026-02-02 19:30:32.220] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.225] [board_logger] [trace] address 54:b7:e5:b2:a9:51
+[2026-02-02 19:30:32.226] [board_logger] [trace] identifier romi-speaker
+[2026-02-02 19:30:32.230] [board_logger] [trace] address 04:cf:8c:b2:6c:96
+[2026-02-02 19:30:32.230] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.451] [board_logger] [trace] address 5e:e0:04:c8:ab:f0
+[2026-02-02 19:30:32.451] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.457] [board_logger] [trace] address 30:4a:2a:6a:91:80
+[2026-02-02 19:30:32.457] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.461] [board_logger] [trace] address de:f5:84:13:cc:93
+[2026-02-02 19:30:32.461] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.570] [board_logger] [trace] address 01:8a:8f:0e:7e:69
+[2026-02-02 19:30:32.570] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.596] [board_logger] [trace] address 6a:e7:ac:cc:ed:4a
+[2026-02-02 19:30:32.596] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.707] [board_logger] [trace] address 10:2b:41:32:22:ef
+[2026-02-02 19:30:32.707] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.819] [board_logger] [trace] address 6e:45:22:a4:29:05
+[2026-02-02 19:30:32.820] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.826] [board_logger] [trace] address 64:7a:f0:6b:12:08
+[2026-02-02 19:30:32.826] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.833] [board_logger] [trace] address 31:47:83:80:09:72
+[2026-02-02 19:30:32.833] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.923] [board_logger] [trace] address 58:bf:25:f1:21:ee
+[2026-02-02 19:30:32.923] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.930] [board_logger] [trace] address 64:07:f6:73:d6:d5
+[2026-02-02 19:30:32.931] [board_logger] [trace] identifier 
+[2026-02-02 19:30:32.934] [board_logger] [trace] address 16:43:2e:f2:fe:35
+[2026-02-02 19:30:32.934] [board_logger] [trace] identifier 
+[2026-02-02 19:30:33.046] [board_logger] [trace] address 34:03:18:7a:6f:91
+[2026-02-02 19:30:33.046] [board_logger] [trace] identifier 
+[2026-02-02 19:30:33.161] [board_logger] [trace] address 4d:64:34:1c:d5:3e
+[2026-02-02 19:30:33.162] [board_logger] [trace] identifier 
+[2026-02-02 19:30:33.167] [board_logger] [trace] address dd:35:b0:da:81:d4
+[2026-02-02 19:30:33.167] [board_logger] [trace] identifier Ganglion-a88a
+[2026-02-02 19:30:33.167] [board_logger] [info] Found GanglionNative device
+[2026-02-02 19:30:33.167] [board_logger] [info] Detected firmware version 2
+[2026-02-02 19:30:36.830] [board_logger] [info] Connected to Ganglion Device
+[2026-02-02 19:30:36.830] [board_logger] [trace] address e8:f2:e2:8f:79:0b
+[2026-02-02 19:30:36.831] [board_logger] [trace] found servce 00001530-1212-efde-1523-785feabcd123
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00001531-1212-efde-1523-785feabcd123
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00001532-1212-efde-1523-785feabcd123
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00001534-1212-efde-1523-785feabcd123
+[2026-02-02 19:30:36.831] [board_logger] [trace] identifier 
+[2026-02-02 19:30:36.831] [board_logger] [trace] found servce 00001800-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a00-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] address 79:7f:97:7f:6a:d0
+[2026-02-02 19:30:36.831] [board_logger] [trace] identifier 
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a01-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a04-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found servce 00001801-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a05-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] address 7c:2f:75:c7:70:cc
+[2026-02-02 19:30:36.831] [board_logger] [trace] found servce 0000180a-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a24-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a26-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a27-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a28-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 00002a29-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] identifier 
+[2026-02-02 19:30:36.831] [board_logger] [trace] found servce 0000fe84-0000-1000-8000-00805f9b34fb
+[2026-02-02 19:30:36.831] [board_logger] [trace] found characteristic 2d30c082-f39f-4ce6-923f-3484ea480596
+[2026-02-02 19:30:36.831] [board_logger] [trace] Scan stopped
+[2026-02-02 19:30:36.859] [board_logger] [trace] found characteristic 2d30c083-f39f-4ce6-923f-3484ea480596
+[2026-02-02 19:30:36.859] [board_logger] [trace] found characteristic 2d30c084-f39f-4ce6-923f-3484ea480596
+[2026-02-02 19:30:36.903] [board_logger] [warning] byte 0 value 206
+[2026-02-02 19:30:36.903] [board_logger] [warning] byte 1 value 97
+[2026-02-02 19:30:36.903] [board_logger] [warning] byte 2 value 99
+[2026-02-02 19:30:36.903] [board_logger] [warning] byte 3 value 99
+[2026-02-02 19:30:36.903] [board_logger] [warning] byte 4 value 101
+[2026-02-02 19:30:36.903] [board_logger] [warning] byte 5 value 108
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 6 value 101
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 7 value 114
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 8 value 111
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 9 value 109
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 10 value 101
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 11 value 116
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 12 value 101
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 13 value 114
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 14 value 32
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 15 value 101
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 16 value 110
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 17 value 97
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 18 value 98
+[2026-02-02 19:30:36.904] [board_logger] [warning] byte 19 value 108
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 0 value 207
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 1 value 101
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 2 value 100
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 3 value 10
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 4 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 5 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 6 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 7 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 8 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 9 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 10 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 11 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 12 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 13 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 14 value 0
+[2026-02-02 19:30:36.918] [board_logger] [warning] byte 15 value 0
+[2026-02-02 19:30:36.919] [board_logger] [warning] byte 16 value 4
+[2026-02-02 19:30:36.919] [board_logger] [warning] byte 17 value 0
+[2026-02-02 19:30:36.919] [board_logger] [warning] byte 18 value 0
+[2026-02-02 19:30:36.919] [board_logger] [warning] byte 19 value 0
+[2026-02-02 19:30:45.544] [board_logger] [trace] File Streamer, file: C:\Users\musta\Documents\OpenBCI_GUI\Recordings\OpenBCISession_2026-02-02_19-30-10\BrainFlow-RAW_2026-02-02_19-30-10_0.csv, mods: w
+[2026-02-02 19:44:22.009] [board_logger] [error] failed to send command s to device
+[2026-02-02 19:46:15.031] [board_logger] [trace] File Streamer, file: C:\Users\musta\Documents\OpenBCI_GUI\Recordings\OpenBCISession_2026-02-02_19-30-10\BrainFlow-RAW_2026-02-02_19-30-10_1.csv, mods: w
+[2026-02-02 19:46:15.032] [board_logger] [error] failed to send command b to device
+[2026-02-02 19:46:51.744] [board_logger] [error] failed to unsubscribe for 0000fe84-0000-1000-8000-00805f9b34fb 2d30c082-f39f-4ce6-923f-3484ea480596
+[2026-02-02 19:46:53.745] [board_logger] [error] failed to unsubscribe for 0000fe84-0000-1000-8000-00805f9b34fb 2d30c082-f39f-4ce6-923f-3484ea480596

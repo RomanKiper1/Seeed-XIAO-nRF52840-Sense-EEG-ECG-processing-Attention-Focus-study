@@ -1,0 +1,260 @@
+Console Log Started at Local Time: 2026-02-01_15-55-32
+Screen Resolution: 2880 X 1800
+High-DPI Screen Detected: true
+Operating System and Version: Windows 11
+JVM Version: 17.0.6
+Welcome to the Processing-based OpenBCI GUI!
+For more information, please visit: https://docs.openbci.com/Software/OpenBCISoftware/GUIDocs/
+OpenBCI_GUI::Setup: GUI v6 Sample Data exists in Documents folder.
+Settings: LogFileMaxDuration = 60 minutes
+OpenBCI_GUI::Settings: Found and loaded existing GUI-wide Settings from file.
+ControlP5 2.3.6 infos, comments, questions at https://github.com/retiutut/controlp5
+TopNav: Internet Connection Successful
+Local Version: v6.0.0-beta.1, Latest Version: v6.0.0-beta.1
+GUI is up to date!
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\neurosdk-x64.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\Unicorn.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\gForceSDKWrapper.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\gforce64.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\simpleble-c.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\MuseLib.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\BrainBitLib.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\GanglionLib.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\BrainFlowBluetooth.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\eego-SDK.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\BoardController.dll
+BrainFlow Version: 5.10.0
+OpenBCI_GUI: AuditoryFeedback: Loading Audio...
+OpenBCI_GUI: AuditoryFeedback: Done Loading Audio!
+OpenBCI_GUI::Control Panel: Playback history file not found.
+OpenBCI_GUI::Setup: Setup is complete!
+[ERROR]: OpenBCI_GUI: This application is not being run with Administrator access. This could limit the ability to connect to devices or read/write files.
+sourceList: click! 
+OpenBCI_GUI: Channel count set to 4
+[DEFAULT]: Refreshing available Ganglions using Native Bluetooth...
+OpenBCI_GUI_Helpers Version: 2.0.1
+[DEFAULT]: Search for Ganglions using Native Bluetooth is in progress.
+Found Ganglion Board: Ganglion-a88a dd:35:b0:da:81:d4
+bleList: click! 
+[DEFAULT]: Ganglion Device Name = Ganglion-a88a
+[DEFAULT]: Attempting to Start Session...
+initButtonPressed: Calling initSystem() after next draw()
+OpenBCI_GUI: Start session. Calling initSystem().
+
+
+=================================================
+||             INITIALIZING SYSTEM             ||
+=================================================
+
+MAC address for Ganglion is dd:35:b0:da:81:d4
+[DEFAULT]: Detected Ganglion firmware version 2
+Sending config string to board: n
+OpenBCI_GUI: Channel count set to 4
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\onnxruntime_arm.dll
+java.lang.NullPointerException
+	at java.base/java.util.Objects.requireNonNull(Objects.java:208)
+	at java.base/java.nio.file.Files.copy(Files.java:3128)
+	at brainflow.JarHelper.unpack_from_jar(JarHelper.java:31)
+	at brainflow.MLModel.<clinit>(MLModel.java:46)
+	at OpenBCI_GUI$W_Focus.initBrainFlowMetric(OpenBCI_GUI.java:24885)
+	at OpenBCI_GUI$W_Focus.<init>(OpenBCI_GUI.java:24672)
+	at OpenBCI_GUI.setupWidgets(OpenBCI_GUI.java:31736)
+	at OpenBCI_GUI$WidgetManager.<init>(OpenBCI_GUI.java:31826)
+	at OpenBCI_GUI.initSystem(OpenBCI_GUI.java:849)
+	at OpenBCI_GUI.systemInitSession(OpenBCI_GUI.java:1117)
+	at OpenBCI_GUI.draw(OpenBCI_GUI.java:654)
+	at processing.core.PApplet.handleDraw(PApplet.java:2094)
+	at processing.opengl.PSurfaceJOGL$DrawListener.display(PSurfaceJOGL.java:840)
+	at jogamp.opengl.GLDrawableHelper.displayImpl(GLDrawableHelper.java:692)
+	at jogamp.opengl.GLDrawableHelper.display(GLDrawableHelper.java:674)
+	at jogamp.opengl.GLAutoDrawableBase$2.run(GLAutoDrawableBase.java:443)
+	at jogamp.opengl.GLDrawableHelper.invokeGLImpl(GLDrawableHelper.java:1293)
+	at jogamp.opengl.GLDrawableHelper.invokeGL(GLDrawableHelper.java:1147)
+	at com.jogamp.newt.opengl.GLWindow.display(GLWindow.java:782)
+	at com.jogamp.opengl.util.AWTAnimatorImpl.display(AWTAnimatorImpl.java:81)
+	at com.jogamp.opengl.util.AnimatorBase.display(AnimatorBase.java:453)
+	at com.jogamp.opengl.util.FPSAnimator$MainTask.run(FPSAnimator.java:178)
+	at java.base/java.util.TimerThread.mainLoop(Timer.java:566)
+	at java.base/java.util.TimerThread.run(Timer.java:516)
+file: onnxruntime_arm.dll is not found in jar file
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\onnxruntime_arm64.dll
+java.lang.NullPointerException
+	at java.base/java.util.Objects.requireNonNull(Objects.java:208)
+	at java.base/java.nio.file.Files.copy(Files.java:3128)
+	at brainflow.JarHelper.unpack_from_jar(JarHelper.java:31)
+	at brainflow.MLModel.<clinit>(MLModel.java:47)
+	at OpenBCI_GUI$W_Focus.initBrainFlowMetric(OpenBCI_GUI.java:24885)
+	at OpenBCI_GUI$W_Focus.<init>(OpenBCI_GUI.java:24672)
+	at OpenBCI_GUI.setupWidgets(OpenBCI_GUI.java:31736)
+	at OpenBCI_GUI$WidgetManager.<init>(OpenBCI_GUI.java:31826)
+	at OpenBCI_GUI.initSystem(OpenBCI_GUI.java:849)
+	at OpenBCI_GUI.systemInitSession(OpenBCI_GUI.java:1117)
+	at OpenBCI_GUI.draw(OpenBCI_GUI.java:654)
+	at processing.core.PApplet.handleDraw(PApplet.java:2094)
+	at processing.opengl.PSurfaceJOGL$DrawListener.display(PSurfaceJOGL.java:840)
+	at jogamp.opengl.GLDrawableHelper.displayImpl(GLDrawableHelper.java:692)
+	at jogamp.opengl.GLDrawableHelper.display(GLDrawableHelper.java:674)
+	at jogamp.opengl.GLAutoDrawableBase$2.run(GLAutoDrawableBase.java:443)
+	at jogamp.opengl.GLDrawableHelper.invokeGLImpl(GLDrawableHelper.java:1293)
+	at jogamp.opengl.GLDrawableHelper.invokeGL(GLDrawableHelper.java:1147)
+	at com.jogamp.newt.opengl.GLWindow.display(GLWindow.java:782)
+	at com.jogamp.opengl.util.AWTAnimatorImpl.display(AWTAnimatorImpl.java:81)
+	at com.jogamp.opengl.util.AnimatorBase.display(AnimatorBase.java:453)
+	at com.jogamp.opengl.util.FPSAnimator$MainTask.run(FPSAnimator.java:178)
+	at java.base/java.util.TimerThread.mainLoop(Timer.java:566)
+	at java.base/java.util.TimerThread.run(Timer.java:516)
+file: onnxruntime_arm64.dll is not found in jar file
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\onnxruntime_x64.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\onnxruntime_x86.dll
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\MLModule.dll
+[SUCCESS]: Marker Widget: Listening for markers on 127.0.0.1:12350
+InitSettings: Saving Default Settings to file!
+SessionSettings: 4 active widgets saved!
+[SUCCESS]: Session started!
+Unpacking to: C:\Users\musta\AppData\Local\Temp\jna-104263544\DataHandler.dll
+Need to call beginShape() first
+WidgetManager.pde: Remapping widgets to container layout...
+[DEFAULT]: Layout [4] selected.
+WM: Powering 1 widgets down, and remapping.
+[DEFAULT]: openBCI_GUI: startButton was pressed. Starting data transfer, wait a few seconds.
+OpenBCI_GUI: openNewLogFile: opened ODF output file: C:\Users\musta\Documents\OpenBCI_GUI\Recordings\OpenBCISession_2026-02-01_15-55-35\OpenBCI-RAW-2026-02-01_15-56-15.txt
+OpenBCI_GUI: BrainFlow Streamer Location: file://C:\Users\musta\Documents\OpenBCI_GUI\Recordings\OpenBCISession_2026-02-01_15-55-35\BrainFlow-RAW_2026-02-01_15-55-35_0.csv:w
+Brainflow start streaming
+[DEFAULT]: Data stream started.
+WARNING: Lost 2 Samples Between 40-42
+[WARN]: Lost packets detected, open packet loss widget for more info
+WARNING: Lost 2 Samples Between 85-87
+WARNING: Lost 2 Samples Between 11-13
+[INFO]: Data streaming is running as usual
+WARNING: Lost 2 Samples Between 47-49
+WARNING: Lost 2 Samples Between 40-42
+WARNING: Lost 2 Samples Between 28-30
+WARNING: Lost 2 Samples Between 28-30
+WARNING: Lost 2 Samples Between 5-7
+WARNING: Lost 2 Samples Between 41-43
+WARNING: Lost 2 Samples Between 91-93
+WARNING: Lost 4 Samples Between 28-31
+WARNING: Lost 2 Samples Between 89-91
+WARNING: Lost 2 Samples Between 89-91
+WARNING: Lost 2 Samples Between 28-30
+WARNING: Lost 2 Samples Between 13-15
+WARNING: Lost 2 Samples Between 64-66
+WARNING: Lost 2 Samples Between 94-96
+WARNING: Lost 2 Samples Between 4-6
+WARNING: Lost 2 Samples Between 14-16
+WARNING: Lost 4 Samples Between 64-67
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+WARNING: Lost 2 Samples Between 76-78
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+WARNING: Lost 2 Samples Between 98-100
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+WARNING: Lost 2 Samples Between 16-18
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+[WARN]: Lost packets detected, open packet loss widget for more info
+[INFO]: Data streaming is running as usual
+WARNING: Lost 2 Samples Between 56-58
+WARNING: Lost 2 Samples Between 68-70
+[DEFAULT]: openBCI_GUI: stopButton was pressed. Stopping data transfer, wait a few seconds.
+Brainflow stop streaming
+[DEFAULT]: Data stream stopped.
+clear() can only be used with createGraphics()
+ConsoleLog: Console closed!
+SessionSettings: saveConfigFile: User selected C:\Users\musta\Documents\OpenBCI_GUI\Settings\GanglionUserSettings.json
+SessionSettings: 3 active widgets saved!
+[SUCCESS]: Settings Saved! Using Expert Mode, you can load these settings using 'N' key. Click "Default" to revert to factory settings.
+SessionSettings: saveConfigFile: Window was closed or the user hit cancel.
+SHUTDOWN HOOK
+openBCI_GUI: haltSystem: Halting system for reconfiguration of settings...
+[DEFAULT]: Data stream is already stopped.

@@ -85,4 +85,84 @@ public:
                        SampleFrame* out_frames) override;
 };
 
+/**
+ * @brief Window filter with winsorization and masked median smoothing.
+ *
+ * Steps:
+ * 1) Estimate robust scale: sigma = 1.4826 * MAD
+ * 2) Winsorize (clip) to +/- c*sigma
+ * 3) Apply median filter only where clipping occurred
+ */
+class WinsorizedMedianWindowFilter final : public IWindowFilter {
+public:
+    /**
+     * @brief Construct with clip factor and median kernel size.
+     */
+    WinsorizedMedianWindowFilter(float clip_factor, size_t kernel_size);
+
+    /**
+     * @brief Reset filter state (no state in stub).
+     */
+    void reset() override;
+
+    /**
+     * @brief Apply winsorization + masked median filter (stub).
+     */
+    void processWindow(const SampleFrame* in_frames,
+                       size_t frame_count,
+                       SampleFrame* out_frames) override;
+
+private:
+    float clip_factor_;
+    size_t kernel_size_;
+};
+
+/**
+ * @brief Stub for reference-based NLMS ECG artifact cancellation.
+ *
+ * Design intent (SOLID):
+ * - Single responsibility: adaptive reference subtraction stage.
+ * - Open for extension: replace internals with MCU-ready fixed-point/stateful NLMS later.
+ */
+class NlmsReferenceWindowFilter final : public IWindowFilter {
+public:
+    NlmsReferenceWindowFilter(size_t reference_channel_index,
+                              size_t taps,
+                              float step_size,
+                              float epsilon,
+                              size_t delay_samples);
+
+    void reset() override;
+    void processWindow(const SampleFrame* in_frames,
+                       size_t frame_count,
+                       SampleFrame* out_frames) override;
+
+private:
+    size_t reference_channel_index_;
+    size_t taps_;
+    float step_size_;
+    float epsilon_;
+    size_t delay_samples_;
+};
+
+/**
+ * @brief Stub for wavelet denoising using sym8 family.
+ *
+ * Implementation intentionally pass-through for now to keep MCU path lightweight until
+ * memory/latency constraints are validated against offline benchmarks.
+ */
+class WaveletSym8WindowFilter final : public IWindowFilter {
+public:
+    WaveletSym8WindowFilter(size_t level, float threshold_scale);
+
+    void reset() override;
+    void processWindow(const SampleFrame* in_frames,
+                       size_t frame_count,
+                       SampleFrame* out_frames) override;
+
+private:
+    size_t level_;
+    float threshold_scale_;
+};
+
 #endif  // FILTERS_H
