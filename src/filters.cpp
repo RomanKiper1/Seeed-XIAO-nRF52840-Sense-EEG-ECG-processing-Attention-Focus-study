@@ -62,7 +62,61 @@ float medianInPlace(float* values, size_t count) {
 float clampFloat(float value, float min_value, float max_value) {
     return std::max(min_value, std::min(max_value, value));
 }
+
+/* Precomputed Butterworth bandpass 1-45 Hz, fs=200, order 4 (4 biquads). */
+constexpr size_t kBandpassBiquads = 4;
+constexpr float kBandpassCoefs[kBandpassBiquads][6] = {
+    {0.0629009449f, 0.1258018897f, 0.0629009449f, 1.0f, -0.1971790139f, 0.0514615715f},
+    {1.0f, 2.0f, 1.0f, 1.0f, -0.2363252552f, 0.4643304771f},
+    {1.0f, -2.0f, 1.0f, 1.0f, -1.9411278602f, 0.9421496071f},
+    {1.0f, -2.0f, 1.0f, 1.0f, -1.9758806019f, 0.9768660283f},
+};
+
+inline float biquadProcess(float x, float* state, const float* coef) {
+    float w = x - coef[4] * state[0] - coef[5] * state[1];
+    float y = coef[0] * w + coef[1] * state[0] + coef[2] * state[1];
+    state[1] = state[0];
+    state[0] = w;
+    return y;
+}
 }  // namespace
+
+BandpassWindowFilter::BandpassWindowFilter(float low_hz, float high_hz, float sampling_rate)
+    : low_hz_(low_hz), high_hz_(high_hz), fs_(sampling_rate) {
+    reset();
+}
+
+void BandpassWindowFilter::reset() {
+    for (size_t ch = 0; ch < kNumChannels; ++ch) {
+        for (size_t b = 0; b < kNumBiquads; ++b) {
+            state_[ch][b][0] = 0.0f;
+            state_[ch][b][1] = 0.0f;
+        }
+    }
+}
+
+void BandpassWindowFilter::processWindow(const SampleFrame* in_frames,
+                                         size_t frame_count,
+                                         SampleFrame* out_frames) {
+    if (in_frames == nullptr || out_frames == nullptr || frame_count == 0) {
+        return;
+    }
+
+    for (size_t ch = 0; ch < BandpassWindowFilter::kNumChannels; ++ch) {
+        for (size_t i = 0; i < frame_count; ++i) {
+            float x = in_frames[i].channels[ch];
+            float y = x;
+            for (size_t b = 0; b < BandpassWindowFilter::kNumBiquads; ++b) {
+                y = biquadProcess(y, state_[ch][b], kBandpassCoefs[b]);
+            }
+            out_frames[i].channels[ch] = y;
+        }
+    }
+
+    for (size_t i = 0; i < frame_count; ++i) {
+        out_frames[i].timestamp_ms = in_frames[i].timestamp_ms;
+    }
+}
 
 WinsorizedMedianWindowFilter::WinsorizedMedianWindowFilter(float clip_factor, size_t kernel_size)
     : clip_factor_(clip_factor), kernel_size_(kernel_size) {}

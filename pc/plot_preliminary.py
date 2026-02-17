@@ -14,6 +14,11 @@ try:
 except ImportError:
     pywt = None
 
+try:
+    from scipy.signal import butter, filtfilt, welch
+except ImportError:
+    butter = filtfilt = welch = None
+
 
 GANGLION_UV_PER_COUNT = 0.001869917138805
 
@@ -22,6 +27,13 @@ GANGLION_UV_PER_COUNT = 0.001869917138805
 class PreprocessConfig:
     scale_mode: str = "auto"
     detrend: str = "median"
+
+
+@dataclass
+class BandpassConfig:
+    low_hz: float = 1.0
+    high_hz: float = 45.0
+    order: int = 4
 
 
 @dataclass
@@ -37,6 +49,17 @@ class WaveletConfig:
     wavelet: str = "sym8"
     threshold_scale: float = 1.0
     level: int = 0
+
+
+@dataclass
+class WinsorConfig:
+    clip_factor: float = 8.0
+    kernel_size: int = 7
+
+
+@dataclass
+class WelchConfig:
+    nfft: int = 512
 
 
 def robust_sigma(x: np.ndarray) -> float:
@@ -62,6 +85,47 @@ def remove_dc(x: np.ndarray, mode: str) -> np.ndarray:
     if mode == "mean":
         return x - np.mean(x)
     return x - np.median(x)
+
+
+def apply_bandpass(x: np.ndarray, config: BandpassConfig, fs: float) -> np.ndarray:
+    if butter is None or filtfilt is None:
+        raise ImportError("scipy is required for bandpass. Install with: pip install scipy")
+    if len(x) < 2:
+        return x.copy()
+    nyq = 0.5 * fs
+    low = max(0.01, config.low_hz / nyq)
+    high = min(0.99, config.high_hz / nyq)
+    if low >= high:
+        return x.copy()
+    b, a = butter(config.order, [low, high], btype="band")
+    return filtfilt(b, a, x.astype(np.float64, copy=False))
+
+
+def winsorize_masked_median(x: np.ndarray, config: WinsorConfig) -> np.ndarray:
+    sigma = robust_sigma(x)
+    limit = config.clip_factor * sigma
+    clipped = np.clip(x, -limit, limit) if limit > 0 else x.copy()
+    mask = np.abs(x) > limit if limit > 0 else np.zeros_like(x, dtype=bool)
+    k = config.kernel_size if config.kernel_size % 2 == 1 else config.kernel_size + 1
+    half = k // 2
+    out = clipped.copy()
+    for i in range(len(x)):
+        if not mask[i]:
+            continue
+        start = max(0, i - half)
+        end = min(len(x), i + half + 1)
+        out[i] = np.median(clipped[start:end])
+    return out
+
+
+def compute_psd_welch(signal: np.ndarray, fs: float, config: WelchConfig) -> tuple[np.ndarray, np.ndarray]:
+    if welch is None:
+        raise ImportError("scipy is required for PSD. Install with: pip install scipy")
+    nfft = min(config.nfft, len(signal))
+    if nfft < 2:
+        return np.array([0.0]), np.array([0.0])
+    freqs, psd = welch(signal.astype(np.float64), fs=fs, nperseg=nfft)
+    return freqs, psd
 
 
 def nlms_adaptive_cancel(primary: np.ndarray, reference: np.ndarray, config: NlmsConfig) -> np.ndarray:
@@ -218,38 +282,74 @@ def save_plot(fig: plt.Figure, path: str, show: bool) -> None:
     plt.close(fig)
 
 
+def plot_time_overlay(
+    time_s: np.ndarray,
+    signals: dict[str, np.ndarray],
+    path: str,
+    title: str,
+    show: bool,
+) -> None:
+    fig = plt.figure(figsize=(12, 4))
+    for label, sig in signals.items():
+        plt.plot(time_s, sig, label=label, alpha=0.8)
+    plt.xlabel("time (s)")
+    plt.ylabel("uV")
+    plt.title(title)
+    plt.legend()
+    save_plot(fig, path, show)
+
+
+def plot_psd_overlay(
+    freqs: np.ndarray,
+    psd_dict: dict[str, np.ndarray],
+    path: str,
+    title: str,
+    show: bool,
+) -> None:
+    fig = plt.figure(figsize=(10, 5))
+    for label, psd in psd_dict.items():
+        db = 10 * np.log10(np.maximum(psd, 1e-20))
+        plt.plot(freqs, db, label=label, alpha=0.8)
+    plt.xlabel("frequency (Hz)")
+    plt.ylabel("Power (dB)")
+    plt.title(title)
+    plt.legend()
+    save_plot(fig, path, show)
+
+
 def plot_dual_comparison(time_s: np.ndarray,
-                         raw: np.ndarray,
+                         baseline: np.ndarray,
                          nlms: np.ndarray,
                          wavelet: np.ndarray,
                          channel_name: str,
                          plot_dir: str,
-                         show: bool) -> None:
+                         show: bool,
+                         baseline_label: str = "RAW") -> None:
     fig1 = plt.figure(figsize=(12, 4))
-    plt.plot(time_s, raw, label="RAW", alpha=0.7)
+    plt.plot(time_s, baseline, label=baseline_label, alpha=0.7)
     plt.plot(time_s, nlms, label="NLMS", alpha=0.9)
     plt.xlabel("time (s)")
     plt.ylabel("uV")
-    plt.title(f"{channel_name}: RAW vs NLMS")
+    plt.title(f"{channel_name}: {baseline_label} vs NLMS")
     plt.legend()
     save_plot(fig1, os.path.join(plot_dir, f"{channel_name}_raw_vs_nlms.png"), show)
 
     fig2 = plt.figure(figsize=(12, 4))
-    plt.plot(time_s, raw, label="RAW", alpha=0.7)
+    plt.plot(time_s, baseline, label=baseline_label, alpha=0.7)
     plt.plot(time_s, wavelet, label="Wavelet(sym8)", alpha=0.9)
     plt.xlabel("time (s)")
     plt.ylabel("uV")
-    plt.title(f"{channel_name}: RAW vs Wavelet(sym8)")
+    plt.title(f"{channel_name}: {baseline_label} vs Wavelet(sym8)")
     plt.legend()
     save_plot(fig2, os.path.join(plot_dir, f"{channel_name}_raw_vs_wavelet.png"), show)
 
     fig3 = plt.figure(figsize=(12, 4))
-    plt.plot(time_s, raw, label="RAW", alpha=0.6)
+    plt.plot(time_s, baseline, label=baseline_label, alpha=0.6)
     plt.plot(time_s, nlms, label="NLMS", alpha=0.9)
     plt.plot(time_s, wavelet, label="Wavelet(sym8)", alpha=0.9)
     plt.xlabel("time (s)")
     plt.ylabel("uV")
-    plt.title(f"{channel_name}: RAW vs NLMS vs Wavelet(sym8)")
+    plt.title(f"{channel_name}: {baseline_label} vs NLMS vs Wavelet(sym8)")
     plt.legend()
     save_plot(fig3, os.path.join(plot_dir, f"{channel_name}_raw_nlms_wavelet.png"), show)
 
@@ -339,7 +439,10 @@ def main() -> None:
                         default="eeg",
                         help="Auto-select channels")
     parser.add_argument("--channels", help="Comma-separated channels (1..4) override preset")
-    parser.add_argument("--reference-channel", type=int, default=3, help="Reference ECG-like channel (1..4)")
+    parser.add_argument("--reference-channel", type=int, default=3,
+                        help="Reference ECG channel for NLMS on EEG (1..4)")
+    parser.add_argument("--ecg-nlms-reference", type=int, default=1,
+                        help="Reference channel for NLMS when processing ECG (default: eeg1)")
     parser.add_argument("--mode",
                         choices=["compare", "nlms", "wavelet"],
                         default="compare",
@@ -352,6 +455,14 @@ def main() -> None:
                         choices=["none", "mean", "median"],
                         default="median",
                         help="Remove DC offset before filtering")
+    parser.add_argument("--bandpass-low", type=float, default=1.0, help="Bandpass lower cutoff (Hz)")
+    parser.add_argument("--bandpass-high", type=float, default=45.0, help="Bandpass upper cutoff (Hz)")
+    parser.add_argument("--bandpass-order", type=int, default=4, help="Bandpass Butterworth order")
+    parser.add_argument("--sampling-rate", type=float, default=200.0, help="Sampling rate (Hz)")
+    parser.add_argument("--no-bandpass", action="store_true", help="Disable bandpass filter")
+    parser.add_argument("--nfft", type=int, default=512, help="Welch PSD window size")
+    parser.add_argument("--winsor-clip", type=float, default=8.0, help="Winsor clip factor")
+    parser.add_argument("--winsor-kernel", type=int, default=7, help="Winsor median kernel size")
     parser.add_argument("--nlms-taps", type=int, default=16, help="NLMS taps")
     parser.add_argument("--nlms-mu", type=float, default=0.06, help="NLMS step size")
     parser.add_argument("--nlms-eps", type=float, default=1e-6, help="NLMS epsilon")
@@ -370,94 +481,155 @@ def main() -> None:
         raise ValueError("Channels must be in range 1..4")
     if args.reference_channel < 1 or args.reference_channel > 4:
         raise ValueError("Reference channel must be in range 1..4")
+    if args.ecg_nlms_reference < 1 or args.ecg_nlms_reference > 4:
+        raise ValueError("ECG NLMS reference must be in range 1..4")
+    if args.reference_channel not in channels and args.mode == "compare":
+        print(f"Note: Reference (ECG) channel eeg{args.reference_channel} not in channels. Add it for ECG visualization.")
 
     pre_cfg = PreprocessConfig(scale_mode=args.scale, detrend=args.detrend)
+    bp_cfg = BandpassConfig(low_hz=args.bandpass_low, high_hz=args.bandpass_high, order=args.bandpass_order)
     nlms_cfg = NlmsConfig(taps=args.nlms_taps, mu=args.nlms_mu, eps=args.nlms_eps, delay_samples=args.nlms_delay)
     wav_cfg = WaveletConfig(wavelet=args.wavelet,
                             threshold_scale=args.wavelet_threshold_scale,
                             level=args.wavelet_level)
+    winsor_cfg = WinsorConfig(clip_factor=args.winsor_clip, kernel_size=args.winsor_kernel)
+    welch_cfg = WelchConfig(nfft=args.nfft)
     show_plots = not args.no_show
+    fs = args.sampling_rate
+    use_bandpass = not args.no_bandpass
 
     df, fmt = load_table(args.csv)
+    all_chs = sorted(set(channels) | {args.reference_channel} | {args.ecg_nlms_reference})
     if fmt == "stream":
-        time_s, selected_raw = extract_raw_stream(df, channels)
-        _, ref_raw_df = extract_raw_stream(df, [args.reference_channel])
+        time_s, selected_raw = extract_raw_stream(df, all_chs)
     else:
-        time_s, selected_raw = extract_raw_brainflow(df, channels)
-        _, ref_raw_df = extract_raw_brainflow(df, [args.reference_channel])
-
+        time_s, selected_raw = extract_raw_brainflow(df, all_chs)
     channel_names = list(selected_raw.columns)
-    ref_col = ref_raw_df.columns[0]
+
+    ref_col = f"eeg{args.reference_channel}" if fmt == "brainflow" else f"ch{args.reference_channel}"
+    ecg_ref_col = f"eeg{args.ecg_nlms_reference}" if fmt == "brainflow" else f"ch{args.ecg_nlms_reference}"
+    if ref_col not in selected_raw.columns or ecg_ref_col not in selected_raw.columns:
+        raise ValueError(f"Reference columns {ref_col}, {ecg_ref_col} must exist")
+
+    print("=== Filter comparison pipeline started ===")
+    print(f"Input file: {args.csv}")
+    print(f"Reference (ECG) channel: {ref_col}")
+    print(f"Channels: {channel_names}")
+    print(f"Mode: {args.mode}, benchmark runs: {args.benchmark_runs}")
+    print(f"Bandpass: {'enabled' if use_bandpass else 'disabled'} ({bp_cfg.low_hz}-{bp_cfg.high_hz} Hz)")
 
     for col in channel_names:
         selected_raw[col] = remove_dc(apply_scale(selected_raw[col].values, pre_cfg), pre_cfg.detrend)
-    reference = remove_dc(apply_scale(ref_raw_df[ref_col].values, pre_cfg), pre_cfg.detrend)
+
+    raw_signals = {col: selected_raw[col].values.astype(np.float64, copy=False) for col in channel_names}
+
+    if use_bandpass:
+        bandpass_signals = {col: apply_bandpass(raw_signals[col], bp_cfg, fs) for col in channel_names}
+    else:
+        bandpass_signals = {col: raw_signals[col].copy() for col in channel_names}
 
     base_name, _ = os.path.splitext(args.csv)
     output_path = args.output or f"{base_name}_compare_filters.csv"
     plot_dir = args.plot_dir or f"{base_name}_plots"
     os.makedirs(plot_dir, exist_ok=True)
 
-    out = pd.DataFrame()
+    out = pd.DataFrame({"time_s": time_s})
     metrics_rows: list[dict[str, float | str]] = []
 
-    print("=== Filter comparison pipeline started ===")
-    print(f"Input file: {args.csv}")
-    print(f"Channels: {channel_names}, reference: {ref_col}")
-    print(f"Mode: {args.mode}, benchmark runs: {args.benchmark_runs}")
-
     for col in channel_names:
-        raw_ch = selected_raw[col].values.astype(np.float64, copy=False)
-        out[f"raw_{col}"] = raw_ch
+        raw_ch = raw_signals[col]
+        bp_ch = bandpass_signals[col]
+        is_ecg = col == ref_col
+        nlms_ref = bandpass_signals[ecg_ref_col] if is_ecg else bandpass_signals[ref_col]
 
-        run_nlms = lambda: nlms_adaptive_cancel(raw_ch, reference, nlms_cfg)
-        run_wav = lambda: wavelet_denoise(raw_ch, wav_cfg)
+        run_nlms = lambda r=bp_ch, ref=nlms_ref: nlms_adaptive_cancel(r.copy(), ref, nlms_cfg)
+        run_wav = lambda r=bp_ch: wavelet_denoise(r.copy(), wav_cfg)
+        run_winsor = lambda r=bp_ch: winsorize_masked_median(r.copy(), winsor_cfg)
 
         nlms_signal = run_nlms() if args.mode in ("compare", "nlms") else None
         wav_signal = run_wav() if args.mode in ("compare", "wavelet") else None
+        winsor_signal = run_winsor() if args.mode == "compare" else None
 
+        out[f"raw_{col}"] = raw_ch
+        out[f"bandpass_{col}"] = bp_ch
         if nlms_signal is not None:
             out[f"nlms_{col}"] = nlms_signal
-            m = benchmark_filter(run_nlms, args.benchmark_runs)
-            m["method"] = "NLMS"
-            m["channel"] = col
-            metrics_rows.append(m)
-            print(f"[{col}] NLMS latency={m['latency_ms_mean']:.3f}±{m['latency_ms_ci95']:.3f} ms, "
-                  f"cpu={m['cpu_pct_mean']:.1f}±{m['cpu_pct_ci95']:.1f} %, "
-                  f"mem={m['mem_kib_mean']:.1f}±{m['mem_kib_ci95']:.1f} KiB")
-
         if wav_signal is not None:
             out[f"wavelet_{col}"] = wav_signal
-            m = benchmark_filter(run_wav, args.benchmark_runs)
-            m["method"] = "Wavelet"
-            m["channel"] = col
-            metrics_rows.append(m)
-            print(f"[{col}] Wavelet latency={m['latency_ms_mean']:.3f}±{m['latency_ms_ci95']:.3f} ms, "
-                  f"cpu={m['cpu_pct_mean']:.1f}±{m['cpu_pct_ci95']:.1f} %, "
-                  f"mem={m['mem_kib_mean']:.1f}±{m['mem_kib_ci95']:.1f} KiB")
+        if winsor_signal is not None:
+            out[f"winsor_{col}"] = winsor_signal
+
+        run_bp = lambda: apply_bandpass(raw_ch.copy(), bp_cfg, fs)
+        for name, run_fn, sig in [
+            ("Bandpass", run_bp, bp_ch if use_bandpass else None),
+            ("NLMS", run_nlms, nlms_signal),
+            ("Wavelet", run_wav, wav_signal),
+            ("WinsorizedMedian", run_winsor, winsor_signal),
+        ]:
+            if sig is not None:
+                m = benchmark_filter(run_fn, args.benchmark_runs)
+                m["method"] = name
+                m["channel"] = col
+                metrics_rows.append(m)
+                print(f"[{col}] {name} latency={m['latency_ms_mean']:.3f}±{m['latency_ms_ci95']:.3f} ms")
 
         if args.mode == "compare" and nlms_signal is not None and wav_signal is not None:
-            plot_dual_comparison(time_s, raw_ch, nlms_signal, wav_signal, col, plot_dir, show_plots)
+            plot_dual_comparison(
+                time_s, bp_ch, nlms_signal, wav_signal, col, plot_dir, show_plots,
+                baseline_label="Bandpass" if use_bandpass else "RAW",
+            )
+            plot_time_overlay(
+                time_s,
+                {"RAW": raw_ch, "Bandpass": bp_ch},
+                os.path.join(plot_dir, f"{col}_raw_vs_bandpass.png"),
+                f"{col}: RAW vs Bandpass ({bp_cfg.low_hz}-{bp_cfg.high_hz} Hz)",
+                show_plots,
+            )
+            plot_time_overlay(
+                time_s,
+                {"RAW": raw_ch, "Bandpass": bp_ch, "NLMS": nlms_signal, "Wavelet": wav_signal, "Winsor": winsor_signal},
+                os.path.join(plot_dir, f"{col}_pipeline_all.png"),
+                f"{col}: Pipeline (RAW, Bandpass, NLMS, Wavelet, Winsor)",
+                show_plots,
+            )
+            freqs, _ = compute_psd_welch(raw_ch, fs, welch_cfg)
+            psd_raw = compute_psd_welch(raw_ch, fs, welch_cfg)[1]
+            psd_bp = compute_psd_welch(bp_ch, fs, welch_cfg)[1]
+            psd_nlms = compute_psd_welch(nlms_signal, fs, welch_cfg)[1]
+            psd_wav = compute_psd_welch(wav_signal, fs, welch_cfg)[1]
+            psd_winsor = compute_psd_welch(winsor_signal, fs, welch_cfg)[1]
+            min_len = min(len(freqs), len(psd_raw), len(psd_bp), len(psd_nlms), len(psd_wav), len(psd_winsor))
+            plot_psd_overlay(
+                freqs[:min_len],
+                {
+                    "RAW": psd_raw[:min_len],
+                    "Bandpass": psd_bp[:min_len],
+                    "NLMS": psd_nlms[:min_len],
+                    "Wavelet": psd_wav[:min_len],
+                    "Winsor": psd_winsor[:min_len],
+                },
+                os.path.join(plot_dir, f"{col}_psd_pipeline.png"),
+                f"{col}: Welch PSD (RAW, Bandpass, NLMS, Wavelet, Winsor)",
+                show_plots,
+            )
         elif args.mode == "nlms" and nlms_signal is not None:
-            fig = plt.figure(figsize=(12, 4))
-            plt.plot(time_s, raw_ch, label="RAW", alpha=0.7)
-            plt.plot(time_s, nlms_signal, label="NLMS", alpha=0.9)
-            plt.title(f"{col}: RAW vs NLMS")
-            plt.xlabel("time (s)")
-            plt.ylabel("uV")
-            plt.legend()
-            save_plot(fig, os.path.join(plot_dir, f"{col}_raw_vs_nlms.png"), show_plots)
+            plot_time_overlay(
+                time_s,
+                {"RAW": raw_ch, "Bandpass": bp_ch, "NLMS": nlms_signal},
+                os.path.join(plot_dir, f"{col}_raw_vs_nlms.png"),
+                f"{col}: RAW vs Bandpass vs NLMS",
+                show_plots,
+            )
         elif args.mode == "wavelet" and wav_signal is not None:
-            fig = plt.figure(figsize=(12, 4))
-            plt.plot(time_s, raw_ch, label="RAW", alpha=0.7)
-            plt.plot(time_s, wav_signal, label="Wavelet(sym8)", alpha=0.9)
-            plt.title(f"{col}: RAW vs Wavelet(sym8)")
-            plt.xlabel("time (s)")
-            plt.ylabel("uV")
-            plt.legend()
-            save_plot(fig, os.path.join(plot_dir, f"{col}_raw_vs_wavelet.png"), show_plots)
+            plot_time_overlay(
+                time_s,
+                {"RAW": raw_ch, "Bandpass": bp_ch, "Wavelet": wav_signal},
+                os.path.join(plot_dir, f"{col}_raw_vs_wavelet.png"),
+                f"{col}: RAW vs Bandpass vs Wavelet",
+                show_plots,
+            )
 
-    save_filtered_csv(time_s, out, output_path)
+    out.to_csv(output_path, index=False)
     print(f"Saved filtered comparison CSV: {output_path}")
 
     if metrics_rows:
@@ -466,7 +638,6 @@ def main() -> None:
         metrics_df.to_csv(metrics_csv, index=False)
         print(f"Saved metrics CSV: {metrics_csv}")
         plot_metrics(metrics_df, plot_dir, show_plots)
-        print(f"Saved metrics chart: {os.path.join(plot_dir, 'performance_metrics_ci95.png')}")
 
     print("=== Done ===")
 

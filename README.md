@@ -37,17 +37,19 @@ Focus: clean structure, SOLID-friendly interfaces, and clear extension points fo
                                                      |
                                                      +--> [PC Compare Pipeline]
                                                      |      |- Preprocess (scale+detrend)
-                                                     |      |- NLMS reference subtraction
-                                                     |      |- Wavelet denoise (sym8)
-                                                     |      |- Plots + benchmark metrics (95% CI)
+                                                     |      |- Bandpass 1-45 Hz
+                                                     |      |- NLMS / Wavelet / WinsorizedMedian
+                                                     |      |- Plots + PSD Welch + benchmark (95% CI)
                                                      |
                                                      +--> [MCU Runtime Pipeline]
+                                                            |- BandpassWindowFilter (1-45 Hz)
                                                             |- WinsorizedMedianWindowFilter (active)
                                                             |- NlmsReferenceWindowFilter (stub)
                                                             |- WaveletSym8WindowFilter (stub)
                                                             -> [SignalBuffer Filtered] -> [Features] -> [Attention]
 
  MemoryManager -> shared allocation interface for MCU modules
+ ECG channel: kECGChannelIndex=2 (channels[2])
 ```
 
 ## Processing Sequence (ASCII)
@@ -56,55 +58,54 @@ Focus: clean structure, SOLID-friendly interfaces, and clear extension points fo
 2) Parse to SampleFrame (GanglionPacketParser)
 3) Push to raw buffer
 4) Read window from raw buffer
-5) Window filter process (winsorize + masked median)
-6) Push to filtered buffer
-7) Extract features
-8) Update attention score
+5) Bandpass 1-45 Hz (first stage)
+6) Winsorized median (or NLMS/Wavelet when activated)
+7) Push to filtered buffer
+8) Extract features
+9) Update attention score
 ```
 
 ## Architecture Diagram
 ```mermaid
 flowchart LR
-    BleReceiver[BleReceiver(BLEorUSB)] --> Parser[GanglionPacketParser]
+    BleReceiver[BleReceiver] --> Parser[GanglionPacketParser]
     Parser --> RawBuffer[SignalBufferRaw]
 
     RawBuffer --> PcCompare[PCComparePipeline]
     PcCompare --> PcPre[PreprocessScaleAndDetrend]
-    PcPre --> PcNlms[NlmsReferenceSubtraction]
-    PcPre --> PcWavelet[WaveletSym8Denoise]
-    PcNlms --> PcViz[PlotsAndBenchmarkCI95]
+    PcPre --> PcBP[Bandpass1-45Hz]
+    PcBP --> PcNlms[NLMS]
+    PcBP --> PcWavelet[Wavelet]
+    PcBP --> PcWinsor[WinsorizedMedian]
+    PcNlms --> PcViz[PlotsPSDMetrics]
     PcWavelet --> PcViz
+    PcWinsor --> PcViz
 
-    RawBuffer --> McuFilter[MCUWindowFilter]
-    McuFilter --> Winsor[WinsorizedMedianActive]
-    McuFilter --> NlmsStub[NlmsReferenceStub]
-    McuFilter --> WaveletStub[WaveletSym8Stub]
-    Winsor --> FilteredBuffer[SignalBufferFiltered]
-    NlmsStub --> FilteredBuffer
-    WaveletStub --> FilteredBuffer
+    RawBuffer --> McuBP[BandpassWindowFilter]
+    McuBP --> McuWinsor[WinsorizedMedianActive]
+    McuBP -.-> McuNlms[NlmsReferenceStub]
+    McuBP -.-> McuWavelet[WaveletSym8Stub]
+    McuWinsor --> FilteredBuffer[SignalBufferFiltered]
     FilteredBuffer --> FeatureExtractor[IFeatureExtractor]
     FeatureExtractor --> AttentionEngine[AttentionEngine]
 
-    MemoryManager[MemoryManager] --- McuFilter
-    MemoryManager --- FilteredBuffer
-    MemoryManager --- FeatureExtractor
-    MemoryManager --- AttentionEngine
+    MemoryManager[MemoryManager] --- McuBP
 ```
 
 ## Pipeline
 1. Input formats: BLE stream from Ganglion (18-bit, 19-bit, raw 24-bit, ASCII/impedance).
 2. Parsing: `GanglionPacketParser` converts packets to `SampleFrame`.
 3. PC preprocessing: scaling to uV (auto/Ganglion) and detrending.
-4. PC dual-filter test:
-   - NLMS adaptive reference subtraction (`eeg1/eeg2` cleaned with `eeg3` reference).
-   - Wavelet denoising using `sym8`.
-5. PC outputs:
-   - RAW vs NLMS, RAW vs Wavelet, RAW vs NLMS vs Wavelet, NLMS vs Wavelet.
-   - Performance figure: latency/CPU/memory with 95% CI + big-O notes.
-6. MCU runtime:
-   - active filter = winsorized median.
-   - NLMS + wavelet pipeline represented by clean stubs pending on-device profiling.
-7. Feature extraction + attention engine on filtered buffer.
+4. PC Bandpass 1-45 Hz (Butterworth, zero-phase via filtfilt).
+5. PC filter comparison (Bandpass -> NLMS / Wavelet / WinsorizedMedian):
+   - EEG: NLMS reference = ECG channel (eeg3).
+   - ECG: NLMS reference = eeg1 (configurable).
+6. PC outputs: RAW vs Bandpass, Bandpass vs NLMS/Wavelet/Winsor, PSD Welch pipeline, metrics.
+7. MCU runtime:
+   - BandpassWindowFilter (1-45 Hz) first stage.
+   - WinsorizedMedian active; NLMS + Wavelet stubs.
+   - `kECGChannelIndex` (2) for channel-specific logic.
+8. Feature extraction + attention engine on filtered buffer.
 
 ## Input / Output Formats
 - MCU input: BLE packets from Ganglion.
@@ -117,14 +118,17 @@ flowchart TD
     step1[1_ReceiveRawData] --> step2[2_ParseToSampleFrame]
     step2 --> step3[3_PushToRawBuffer]
     step3 --> step4[4_PCPreprocessScaleDetrend]
-    step4 --> step5a[5a_RunNlms]
-    step4 --> step5b[5b_RunWaveletSym8]
-    step5a --> step6[6_SavePlotsAndMetrics]
-    step5b --> step6
-    step3 --> step7[7_MCUWindowFilterStubOrWinsor]
-    step7 --> step8[8_PushToFilteredBuffer]
-    step8 --> step9[9_ExtractFeatures]
-    step9 --> step10[10_UpdateAttentionScore]
+    step4 --> step5[5_PCBandpass1-45Hz]
+    step5 --> step6a[6a_NLMS]
+    step5 --> step6b[6b_Wavelet]
+    step5 --> step6c[6c_WinsorizedMedian]
+    step6a --> step7[7_SavePlotsPSDMetrics]
+    step6b --> step7
+    step6c --> step7
+    step3 --> step8[8_MCUBandpassThenWinsor]
+    step8 --> step9[9_PushToFilteredBuffer]
+    step9 --> step10[10_ExtractFeatures]
+    step10 --> step11[11_UpdateAttentionScore]
 ```
 
 ## Components
@@ -155,24 +159,35 @@ Use Arduino IDE with **Seeed nRF52 Boards 1.1.12** selected and target **Seeed X
 
 ### Install dependencies
 ```bash
-pip install numpy pandas matplotlib mne PyWavelets
+pip install numpy pandas matplotlib mne PyWavelets scipy
 ```
 
 ### CLI User Guide (Git Bash)
 Use these commands from the repository root:
 
-1) Compare NLMS vs Wavelet(sym8) on EEG channels 1 and 2 using ECG reference channel 3:
+1) Quick start with bandpass (recommended):
 ```bash
 python pc/plot_preliminary.py \
   --csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv" \
-  --preset eeg \
+  --channels 1,2,3 \
   --reference-channel 3 \
   --mode compare \
   --benchmark-runs 20 \
   --no-show
 ```
 
-2) Tune NLMS (more taps and slower adaptation):
+2) Compare without bandpass (legacy):
+```bash
+python pc/plot_preliminary.py \
+  --csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv" \
+  --preset eeg \
+  --reference-channel 3 \
+  --mode compare \
+  --no-bandpass \
+  --no-show
+```
+
+3) Tune NLMS (more taps and slower adaptation):
 ```bash
 python pc/plot_preliminary.py \
   --csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv" \
@@ -186,7 +201,7 @@ python pc/plot_preliminary.py \
   --no-show
 ```
 
-3) Tune wavelet denoising (sym8):
+4) Tune wavelet denoising (sym8):
 ```bash
 python pc/plot_preliminary.py \
   --csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv" \
@@ -222,8 +237,22 @@ python pc/plot_preliminary.py [FLAGS]
   If provided, this overrides `--preset`.
 
 - `--reference-channel <1..4>`  
-  Reference channel used by NLMS (typically ECG-like channel 3).  
+  ECG channel (reference for NLMS on EEG channels).  
   Default: `3`.
+
+- `--ecg-nlms-reference <1..4>`  
+  Reference channel for NLMS when processing ECG channel.  
+  Default: `1` (eeg1).
+
+#### Bandpass
+- `--bandpass-low <float>`  Lower cutoff (Hz). Default: `1.0`.
+- `--bandpass-high <float>` Upper cutoff (Hz). Default: `45.0`.
+- `--bandpass-order <int>` Butterworth order. Default: `4`.
+- `--sampling-rate <float>` Sampling rate (Hz). Default: `200.0`.
+- `--no-bandpass` Disable bandpass filter (legacy behavior).
+
+#### PSD
+- `--nfft <int>` Welch PSD window size. Default: `512`.
 
 #### Filter mode
 - `--mode <compare|nlms|wavelet>`  
@@ -281,6 +310,9 @@ python pc/plot_preliminary.py [FLAGS]
   - lower -> gentler denoising, more residual artifacts  
   Default: `1.0`.
 
+- `--winsor-clip <float>` Winsor clip factor. Default: `8.0`.
+- `--winsor-kernel <int>` Winsor median kernel size. Default: `7`.
+
 #### Benchmark and output
 - `--benchmark-runs <int>`  
   Repetitions per channel/method for latency/CPU/memory stats and 95% CI.  
@@ -298,23 +330,23 @@ python pc/plot_preliminary.py [FLAGS]
   Figures are still saved to disk.
 
 #### Quick recommendations
-- First baseline run:
-  - `--mode compare --preset eeg --reference-channel 3 --benchmark-runs 20 --no-show`
+- First baseline run (full pipeline with bandpass):
+  - `--mode compare --channels 1,2,3 --reference-channel 3 --no-show`
 - If NLMS underperforms:
   - increase taps (`--nlms-taps 24`), reduce step size (`--nlms-mu 0.03..0.05`)
 - If wavelet over-smooths EEG:
   - reduce `--wavelet-threshold-scale` (e.g., `0.8`)
 
 ### Generated Outputs
-- Comparison CSV: `<input>_compare_filters.csv`
+- Comparison CSV: `<input>_compare_filters.csv` (raw, bandpass, nlms, wavelet, winsor per channel)
 - Plot directory: `<input>_plots/`
-  - `eeg1_raw_vs_nlms.png`
-  - `eeg1_raw_vs_wavelet.png`
-  - `eeg1_raw_nlms_wavelet.png`
-  - `eeg1_nlms_vs_wavelet.png`
-  - same set for `eeg2` (or selected channels)
-  - `performance_metrics_ci95.png`
-  - `performance_metrics_ci95.csv`
+  - `{channel}_raw_vs_bandpass.png`
+  - `{channel}_raw_vs_nlms.png`, `{channel}_raw_vs_wavelet.png`
+  - `{channel}_raw_nlms_wavelet.png`, `{channel}_nlms_vs_wavelet.png`
+  - `{channel}_pipeline_all.png` (time series: RAW, Bandpass, NLMS, Wavelet, Winsor)
+  - `{channel}_psd_pipeline.png` (Welch PSD overlay per stage)
+  - same set for eeg1, eeg2, eeg3 (ECG) when included in `--channels`
+  - `performance_metrics_ci95.png`, `performance_metrics_ci95.csv`
 
 ### Performance Metrics Definition
 - Latency: wall-clock runtime from filter start to filter finish per channel.

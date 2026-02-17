@@ -11,13 +11,15 @@
 namespace {
 constexpr size_t kBufferCapacity = 256;
 constexpr size_t kWindowSize = 16;
+constexpr float kSamplingRateHz = 200.0f;
 
 BleReceiver g_receiver;
 GanglionPacketParser g_parser;
 SignalBuffer g_raw_buffer(kBufferCapacity);
 SignalBuffer g_filtered_buffer(kBufferCapacity);
+BandpassWindowFilter g_bandpass_filter(/*low_hz=*/1.0f, /*high_hz=*/45.0f, kSamplingRateHz);
 WinsorizedMedianWindowFilter g_window_filter(8.0f, 7);
-NlmsReferenceWindowFilter g_nlms_filter(/*reference_channel_index=*/2,
+NlmsReferenceWindowFilter g_nlms_filter(/*reference_channel_index=*/kECGChannelIndex,
                                         /*taps=*/16,
                                         /*step_size=*/0.06f,
                                         /*epsilon=*/1e-6f,
@@ -27,6 +29,7 @@ DummyFeatureExtractor g_feature_extractor;
 AttentionEngine g_attention;
 
 SampleFrame g_raw_window[kWindowSize];
+SampleFrame g_bandpass_window[kWindowSize];
 SampleFrame g_filtered_window[kWindowSize];
 
 /**
@@ -64,18 +67,12 @@ void loop() {
 
     // 2) Parsing: GanglionPacketParser -> raw buffer
     if (g_raw_buffer.readWindow(kWindowSize, g_raw_window)) {
-        // 3) Processing (pre-filter): placeholder for optional steps
-        // 4) Viz v1: handled on host (PC)
+        // 3) Bandpass 1-45 Hz (first stage)
+        g_bandpass_filter.processWindow(g_raw_window, kWindowSize, g_bandpass_window);
 
-        // 5) Filtering: winsorization + masked median
-        // NOTE: Offline Python currently compares NLMS vs Wavelet(sym8).
-        // On MCU these paths are intentionally stubs until memory and latency
-        // budgets are validated.
-        //
-        // Example wiring (currently disabled):
-        // g_nlms_filter.processWindow(g_raw_window, kWindowSize, g_filtered_window);
-        // g_wavelet_filter.processWindow(g_raw_window, kWindowSize, g_filtered_window);
-        g_window_filter.processWindow(g_raw_window, kWindowSize, g_filtered_window);
+        // 4) Winsorized median (active). NLMS/Wavelet stubs receive g_bandpass_window.
+        g_window_filter.processWindow(g_bandpass_window, kWindowSize, g_filtered_window);
+
         g_filtered_buffer.pushSamples(g_filtered_window, kWindowSize);
     }
 

@@ -85,6 +85,32 @@ public:
                        SampleFrame* out_frames) override;
 };
 
+/** Channel index for ECG (channels[2] = eeg3). */
+constexpr size_t kECGChannelIndex = 2;
+
+/**
+ * @brief IIR Bandpass filter (1-45 Hz, 200 Hz fs, Butterworth order 4).
+ *
+ * Processes all 4 channels. Placed first in pipeline before WinsorizedMedian/NLMS/Wavelet.
+ */
+class BandpassWindowFilter final : public IWindowFilter {
+public:
+    BandpassWindowFilter(float low_hz, float high_hz, float sampling_rate);
+
+    void reset() override;
+    void processWindow(const SampleFrame* in_frames,
+                       size_t frame_count,
+                       SampleFrame* out_frames) override;
+
+private:
+    float low_hz_;
+    float high_hz_;
+    float fs_;
+    static constexpr size_t kNumBiquads = 4;
+    static constexpr size_t kNumChannels = 4;
+    float state_[kNumChannels][kNumBiquads][2];  // w[n-1], w[n-2] per biquad per channel
+};
+
 /**
  * @brief Window filter with winsorization and masked median smoothing.
  *
