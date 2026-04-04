@@ -15,9 +15,10 @@ except ImportError:
     pywt = None
 
 try:
-    from scipy.signal import butter, filtfilt, welch
+    from scipy.signal import butter, filtfilt, welch, iirnotch
 except ImportError:
     butter = filtfilt = welch = None
+    iirnotch = None
 
 
 GANGLION_UV_PER_COUNT = 0.001869917138805
@@ -34,6 +35,12 @@ class BandpassConfig:
     low_hz: float = 1.0
     high_hz: float = 45.0
     order: int = 4
+
+
+@dataclass
+class NotchConfig:
+    freq_hz: float = 50.0
+    quality: float = 30.0
 
 
 @dataclass
@@ -98,6 +105,18 @@ def apply_bandpass(x: np.ndarray, config: BandpassConfig, fs: float) -> np.ndarr
     if low >= high:
         return x.copy()
     b, a = butter(config.order, [low, high], btype="band")
+    return filtfilt(b, a, x.astype(np.float64, copy=False))
+
+
+def apply_notch(x: np.ndarray, config: NotchConfig, fs: float) -> np.ndarray:
+    if iirnotch is None or filtfilt is None:
+        raise ImportError("scipy is required for notch filter. Install with: pip install scipy")
+    if len(x) < 2:
+        return x.copy()
+    nyq = 0.5 * fs
+    if config.freq_hz <= 0 or config.freq_hz >= nyq:
+        return x.copy()
+    b, a = iirnotch(config.freq_hz, config.quality, fs)
     return filtfilt(b, a, x.astype(np.float64, copy=False))
 
 
@@ -363,6 +382,59 @@ def plot_dual_comparison(time_s: np.ndarray,
     save_plot(fig4, os.path.join(plot_dir, f"{channel_name}_nlms_vs_wavelet.png"), show)
 
 
+def plot_pairwise_vs_winsor(
+    time_s: np.ndarray,
+    signals: dict[str, np.ndarray],
+    winsor: np.ndarray,
+    channel_name: str,
+    plot_dir: str,
+    show: bool,
+) -> None:
+    """Plot each filter vs Winsor in time domain."""
+    for label, sig in signals.items():
+        if label == "Winsor":
+            continue
+        fig = plt.figure(figsize=(12, 4))
+        plt.plot(time_s, sig, label=label, alpha=0.8)
+        plt.plot(time_s, winsor, label="Winsor", alpha=0.8)
+        plt.xlabel("time (s)")
+        plt.ylabel("uV")
+        plt.title(f"{channel_name}: {label} vs Winsor")
+        plt.legend()
+        safe_label = label.replace("+", "_").replace(" ", "_").lower()
+        save_plot(fig, os.path.join(plot_dir, f"{channel_name}_{safe_label}_vs_winsor.png"), show)
+
+
+def plot_pairwise_psd_vs_winsor(
+    freqs: np.ndarray,
+    psd_dict: dict[str, np.ndarray],
+    channel_name: str,
+    plot_dir: str,
+    show: bool,
+) -> None:
+    """Plot each filter vs Winsor PSD (pairwise PSD comparison)."""
+    if "Winsor" not in psd_dict:
+        return
+    psd_winsor = psd_dict["Winsor"]
+    for label, psd in psd_dict.items():
+        if label == "Winsor":
+            continue
+        min_len = min(len(freqs), len(psd), len(psd_winsor))
+        if min_len < 2:
+            continue
+        fig = plt.figure(figsize=(10, 5))
+        db_other = 10 * np.log10(np.maximum(psd[:min_len], 1e-20))
+        db_winsor = 10 * np.log10(np.maximum(psd_winsor[:min_len], 1e-20))
+        plt.plot(freqs[:min_len], db_other, label=label, alpha=0.9)
+        plt.plot(freqs[:min_len], db_winsor, label="Winsor", alpha=0.9)
+        plt.xlabel("frequency (Hz)")
+        plt.ylabel("Power (dB)")
+        plt.title(f"{channel_name}: PSD {label} vs Winsor")
+        plt.legend()
+        safe_label = label.replace("+", "_").replace(" ", "_").lower()
+        save_plot(fig, os.path.join(plot_dir, f"{channel_name}_psd_{safe_label}_vs_winsor.png"), show)
+
+
 def ci95(values: list[float]) -> tuple[float, float]:
     if not values:
         return 0.0, 0.0
@@ -460,6 +532,9 @@ def main() -> None:
     parser.add_argument("--bandpass-order", type=int, default=4, help="Bandpass Butterworth order")
     parser.add_argument("--sampling-rate", type=float, default=200.0, help="Sampling rate (Hz)")
     parser.add_argument("--no-bandpass", action="store_true", help="Disable bandpass filter")
+    parser.add_argument("--no-notch", action="store_true", help="Disable 50 Hz notch filter")
+    parser.add_argument("--notch-freq", type=float, default=50.0, help="Notch center frequency (Hz)")
+    parser.add_argument("--notch-Q", type=float, default=30.0, help="Notch quality factor (narrower=higher)")
     parser.add_argument("--nfft", type=int, default=512, help="Welch PSD window size")
     parser.add_argument("--winsor-clip", type=float, default=8.0, help="Winsor clip factor")
     parser.add_argument("--winsor-kernel", type=int, default=7, help="Winsor median kernel size")
@@ -471,6 +546,10 @@ def main() -> None:
     parser.add_argument("--wavelet-level", type=int, default=0, help="Wavelet decomposition level, 0=auto")
     parser.add_argument("--wavelet-threshold-scale", type=float, default=1.0, help="Threshold scale multiplier")
     parser.add_argument("--benchmark-runs", type=int, default=20, help="Benchmark repetitions per channel/method")
+    parser.add_argument("--t-start", type=float, default=None,
+                        help="Start time (s) for slicing data; omit for full range")
+    parser.add_argument("--t-end", type=float, default=None,
+                        help="End time (s) for slicing data; omit for full range")
     parser.add_argument("--output", help="Output CSV path")
     parser.add_argument("--plot-dir", help="Directory for figures")
     parser.add_argument("--no-show", action="store_true", help="Do not open matplotlib windows")
@@ -488,6 +567,7 @@ def main() -> None:
 
     pre_cfg = PreprocessConfig(scale_mode=args.scale, detrend=args.detrend)
     bp_cfg = BandpassConfig(low_hz=args.bandpass_low, high_hz=args.bandpass_high, order=args.bandpass_order)
+    notch_cfg = NotchConfig(freq_hz=args.notch_freq, quality=args.notch_Q)
     nlms_cfg = NlmsConfig(taps=args.nlms_taps, mu=args.nlms_mu, eps=args.nlms_eps, delay_samples=args.nlms_delay)
     wav_cfg = WaveletConfig(wavelet=args.wavelet,
                             threshold_scale=args.wavelet_threshold_scale,
@@ -497,6 +577,7 @@ def main() -> None:
     show_plots = not args.no_show
     fs = args.sampling_rate
     use_bandpass = not args.no_bandpass
+    use_notch = not args.no_notch
 
     df, fmt = load_table(args.csv)
     all_chs = sorted(set(channels) | {args.reference_channel} | {args.ecg_nlms_reference})
@@ -504,6 +585,15 @@ def main() -> None:
         time_s, selected_raw = extract_raw_stream(df, all_chs)
     else:
         time_s, selected_raw = extract_raw_brainflow(df, all_chs)
+
+    if args.t_start is not None or args.t_end is not None:
+        t_min = args.t_start if args.t_start is not None else time_s.min()
+        t_max = args.t_end if args.t_end is not None else time_s.max()
+        mask = (time_s >= t_min) & (time_s <= t_max)
+        time_s = time_s[mask].copy()
+        selected_raw = selected_raw.loc[mask].reset_index(drop=True)
+        print(f"Time window: {t_min:.1f}-{t_max:.1f} s ({mask.sum()} samples)")
+
     channel_names = list(selected_raw.columns)
 
     ref_col = f"eeg{args.reference_channel}" if fmt == "brainflow" else f"ch{args.reference_channel}"
@@ -517,6 +607,7 @@ def main() -> None:
     print(f"Channels: {channel_names}")
     print(f"Mode: {args.mode}, benchmark runs: {args.benchmark_runs}")
     print(f"Bandpass: {'enabled' if use_bandpass else 'disabled'} ({bp_cfg.low_hz}-{bp_cfg.high_hz} Hz)")
+    print(f"Notch 50 Hz: {'enabled' if use_notch else 'disabled'}")
 
     for col in channel_names:
         selected_raw[col] = remove_dc(apply_scale(selected_raw[col].values, pre_cfg), pre_cfg.detrend)
@@ -527,6 +618,8 @@ def main() -> None:
         bandpass_signals = {col: apply_bandpass(raw_signals[col], bp_cfg, fs) for col in channel_names}
     else:
         bandpass_signals = {col: raw_signals[col].copy() for col in channel_names}
+    if use_notch:
+        bandpass_signals = {col: apply_notch(bandpass_signals[col], notch_cfg, fs) for col in channel_names}
 
     base_name, _ = os.path.splitext(args.csv)
     output_path = args.output or f"{base_name}_compare_filters.csv"
@@ -574,22 +667,23 @@ def main() -> None:
                 print(f"[{col}] {name} latency={m['latency_ms_mean']:.3f}±{m['latency_ms_ci95']:.3f} ms")
 
         if args.mode == "compare" and nlms_signal is not None and wav_signal is not None:
+            bp_label = "Bandpass+Notch50" if (use_bandpass and use_notch) else ("Bandpass" if use_bandpass else "RAW")
             plot_dual_comparison(
                 time_s, bp_ch, nlms_signal, wav_signal, col, plot_dir, show_plots,
-                baseline_label="Bandpass" if use_bandpass else "RAW",
+                baseline_label=bp_label,
             )
             plot_time_overlay(
                 time_s,
-                {"RAW": raw_ch, "Bandpass": bp_ch},
+                {"RAW": raw_ch, bp_label: bp_ch},
                 os.path.join(plot_dir, f"{col}_raw_vs_bandpass.png"),
-                f"{col}: RAW vs Bandpass ({bp_cfg.low_hz}-{bp_cfg.high_hz} Hz)",
+                f"{col}: RAW vs {bp_label} ({bp_cfg.low_hz}-{bp_cfg.high_hz} Hz)",
                 show_plots,
             )
             plot_time_overlay(
                 time_s,
-                {"RAW": raw_ch, "Bandpass": bp_ch, "NLMS": nlms_signal, "Wavelet": wav_signal, "Winsor": winsor_signal},
+                {"RAW": raw_ch, bp_label: bp_ch, "NLMS": nlms_signal, "Wavelet": wav_signal, "Winsor": winsor_signal},
                 os.path.join(plot_dir, f"{col}_pipeline_all.png"),
-                f"{col}: Pipeline (RAW, Bandpass, NLMS, Wavelet, Winsor)",
+                f"{col}: Pipeline (RAW, {bp_label}, NLMS, Wavelet, Winsor)",
                 show_plots,
             )
             freqs, _ = compute_psd_welch(raw_ch, fs, welch_cfg)
@@ -603,14 +697,33 @@ def main() -> None:
                 freqs[:min_len],
                 {
                     "RAW": psd_raw[:min_len],
-                    "Bandpass": psd_bp[:min_len],
+                    bp_label: psd_bp[:min_len],
                     "NLMS": psd_nlms[:min_len],
                     "Wavelet": psd_wav[:min_len],
                     "Winsor": psd_winsor[:min_len],
                 },
                 os.path.join(plot_dir, f"{col}_psd_pipeline.png"),
-                f"{col}: Welch PSD (RAW, Bandpass, NLMS, Wavelet, Winsor)",
+                f"{col}: Welch PSD (RAW, {bp_label}, NLMS, Wavelet, Winsor)",
                 show_plots,
+            )
+            signals_for_winsor = {
+                "RAW": raw_ch,
+                bp_label: bp_ch,
+                "NLMS": nlms_signal,
+                "Wavelet": wav_signal,
+            }
+            plot_pairwise_vs_winsor(
+                time_s, signals_for_winsor, winsor_signal, col, plot_dir, show_plots
+            )
+            psd_for_winsor = {
+                "RAW": psd_raw[:min_len],
+                bp_label: psd_bp[:min_len],
+                "NLMS": psd_nlms[:min_len],
+                "Wavelet": psd_wav[:min_len],
+                "Winsor": psd_winsor[:min_len],
+            }
+            plot_pairwise_psd_vs_winsor(
+                freqs[:min_len], psd_for_winsor, col, plot_dir, show_plots
             )
         elif args.mode == "nlms" and nlms_signal is not None:
             plot_time_overlay(

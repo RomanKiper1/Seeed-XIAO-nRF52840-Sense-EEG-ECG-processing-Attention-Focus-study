@@ -251,6 +251,11 @@ python pc/plot_preliminary.py [FLAGS]
 - `--sampling-rate <float>` Sampling rate (Hz). Default: `200.0`.
 - `--no-bandpass` Disable bandpass filter (legacy behavior).
 
+- `--no-notch` Disable 50 Hz notch filter (power line interference removal).  
+  By default, notch is enabled after bandpass.
+- `--notch-freq <float>` Notch center frequency (Hz). Default: `50.0`.
+- `--notch-Q <float>` Notch quality factor (higher = narrower). Default: `30.0`.
+
 #### PSD
 - `--nfft <int>` Welch PSD window size. Default: `512`.
 
@@ -312,6 +317,16 @@ python pc/plot_preliminary.py [FLAGS]
 
 - `--winsor-clip <float>` Winsor clip factor. Default: `8.0`.
 - `--winsor-kernel <int>` Winsor median kernel size. Default: `7`.
+
+#### Time window
+- `--t-start <float>`  
+  Start time (seconds) for slicing data. Omit for full range.
+
+- `--t-end <float>`  
+  End time (seconds) for slicing data. Omit for full range.
+
+  Example (relaxed state 5–55 s only):  
+  `--t-start 5 --t-end 55`
 
 #### Benchmark and output
 - `--benchmark-runs <int>`  
