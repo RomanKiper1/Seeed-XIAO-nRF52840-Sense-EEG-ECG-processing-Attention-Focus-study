@@ -15,13 +15,19 @@ except ImportError:
     pywt = None
 
 try:
-    from scipy.signal import butter, filtfilt, welch, iirnotch
+    from scipy.signal import butter, filtfilt, welch, iirnotch, spectrogram
 except ImportError:
     butter = filtfilt = welch = None
     iirnotch = None
+    spectrogram = None
 
 
 GANGLION_UV_PER_COUNT = 0.001869917138805
+
+# Match blank_motor_stop.ino: SAMPLING_FREQ / FFT_SIZE
+MCU_FS = 200.0
+MCU_NFFT = 256
+MCU_DF = MCU_FS / MCU_NFFT  # ~0.78125 Hz / bin
 
 
 @dataclass
@@ -301,6 +307,154 @@ def save_plot(fig: plt.Figure, path: str, show: bool) -> None:
     plt.close(fig)
 
 
+def mcu_band_bin_edges() -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
+    """Theta / Alpha / Beta bin ranges (inclusive), same rounding as MCU (round(f/DF))."""
+    df = MCU_DF
+    theta = (int(round(4.0 / df)), int(round(8.0 / df)))
+    alpha = (int(round(8.0 / df)), int(round(13.0 / df)))
+    beta = (int(round(13.0 / df)), int(round(30.0 / df)))
+    return theta, alpha, beta
+
+
+def band_power_rfft_sum(psd_line: np.ndarray, lo: int, hi: int) -> float:
+    hi = min(hi, len(psd_line) - 1)
+    lo = max(0, lo)
+    if lo > hi:
+        return 0.0
+    return float(np.sum(psd_line[lo : hi + 1]))
+
+
+def mcu_sliding_band_powers(
+    x: np.ndarray,
+    fs: float,
+    nfft: int,
+    hop: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Hamming window, rFFT magnitude-squared per block; sum bins for theta/alpha/beta (MCU bins).
+    Time axis = center sample of each window / fs.
+    """
+    x = np.asarray(x, dtype=np.float64).ravel()
+    if len(x) < nfft:
+        return (np.array([]), np.array([]), np.array([]), np.array([]))
+    w = np.hamming(nfft)
+    theta_b, alpha_b, beta_b = mcu_band_bin_edges()
+    t_centers: list[float] = []
+    th: list[float] = []
+    al: list[float] = []
+    be: list[float] = []
+    for start in range(0, len(x) - nfft + 1, hop):
+        seg = x[start : start + nfft] * w
+        spec = np.fft.rfft(seg)
+        p = np.abs(spec) ** 2
+        t_centers.append((start + 0.5 * nfft) / fs)
+        th.append(band_power_rfft_sum(p, theta_b[0], theta_b[1]))
+        al.append(band_power_rfft_sum(p, alpha_b[0], alpha_b[1]))
+        be.append(band_power_rfft_sum(p, beta_b[0], beta_b[1]))
+    return (
+        np.array(t_centers),
+        np.array(th),
+        np.array(al),
+        np.array(be),
+    )
+
+
+def plot_mcu_band_timeseries(
+    time_s: np.ndarray,
+    theta_p: np.ndarray,
+    alpha_p: np.ndarray,
+    beta_p: np.ndarray,
+    channel_name: str,
+    plot_dir: str,
+    show: bool,
+    hop_samples: int,
+) -> None:
+    theta_rng, alpha_rng, beta_rng = mcu_band_bin_edges()
+    fig, axes = plt.subplots(3, 1, figsize=(12, 7), sharex=True)
+    titles = [
+        f"Theta (~4–8 Hz), bins {theta_rng[0]}–{theta_rng[1]}",
+        f"Alpha (~8–13 Hz), bins {alpha_rng[0]}–{alpha_rng[1]}",
+        f"Beta (~13–30 Hz), bins {beta_rng[0]}–{beta_rng[1]}",
+    ]
+    series = [theta_p, alpha_p, beta_p]
+    for ax, y, title in zip(axes, series, titles):
+        ax.plot(time_s, y, color="C0", lw=0.8)
+        ax.set_ylabel("Σ|FFT|² (arb.)")
+        ax.set_title(title)
+    axes[-1].set_xlabel("time (s)")
+    fig.suptitle(
+        f"{channel_name}: band power vs time (MCU-like: Fs={MCU_FS} Hz, NFFT={MCU_NFFT}, "
+        f"hop={hop_samples} samples, Hamming)",
+        fontsize=11,
+    )
+    save_plot(fig, os.path.join(plot_dir, f"{channel_name}_bands_timeseries_mcu.png"), show)
+
+
+def plot_welch_psd_with_mcu_bands(
+    freqs: np.ndarray,
+    psd: np.ndarray,
+    channel_name: str,
+    plot_dir: str,
+    show: bool,
+    title_suffix: str,
+) -> None:
+    # --nfft controls Welch resolution; shading is by Hz (theta/alpha/beta), not MCU bins.
+    fig = plt.figure(figsize=(11, 5))
+    n = min(len(freqs), len(psd))
+    db = 10 * np.log10(np.maximum(psd[:n], 1e-20))
+    plt.plot(freqs[:n], db, color="k", lw=0.9)
+    plt.axvspan(4, 8, alpha=0.2, color="#8888cc", label="Theta 4–8 Hz")
+    plt.axvspan(8, 13, alpha=0.2, color="#88cc88", label="Alpha 8–13 Hz")
+    plt.axvspan(13, 30, alpha=0.2, color="#cc8888", label="Beta 13–30 Hz")
+    plt.xlabel("frequency (Hz)")
+    plt.ylabel("PSD (dB)")
+    plt.title(f"{channel_name}: Welch PSD + EEG bands {title_suffix}")
+    plt.legend(loc="upper right", fontsize=8)
+    if len(freqs):
+        plt.xlim(0, min(60.0, float(np.max(freqs))))
+    save_plot(fig, os.path.join(plot_dir, f"{channel_name}_psd_welch_bands_shaded.png"), show)
+
+
+def plot_spectrogram_mcu(
+    x: np.ndarray,
+    fs: float,
+    channel_name: str,
+    plot_dir: str,
+    show: bool,
+) -> None:
+    """STFT spectrogram (Hamming, nperseg=256); log power — Bishop-style EEG display."""
+    if spectrogram is None:
+        raise ImportError("scipy.signal.spectrogram required. pip install scipy")
+    x = np.asarray(x, dtype=np.float64).ravel()
+    nperseg = min(MCU_NFFT, len(x))
+    if nperseg < 8:
+        return
+    noverlap = max(0, (nperseg * 3) // 4)
+    f, t, Sxx = spectrogram(
+        x,
+        fs,
+        window="hamming",
+        nperseg=nperseg,
+        noverlap=noverlap,
+        nfft=nperseg,
+        scaling="density",
+    )
+    fig = plt.figure(figsize=(12, 4))
+    log_sxx = 10 * np.log10(Sxx + 1e-20)
+    vmax = np.percentile(log_sxx, 99)
+    vmin = vmax - 40
+    plt.pcolormesh(t, f, log_sxx, shading="gouraud", vmin=vmin, vmax=vmax, cmap="magma")
+    plt.ylabel("frequency (Hz)")
+    plt.xlabel("time (s)")
+    plt.title(
+        f"{channel_name}: spectrogram (Hamming, nperseg={nperseg}, overlap={noverlap}; "
+        f"MCU DF={MCU_DF:.5f} Hz/bin)",
+    )
+    plt.ylim(0, 45)
+    plt.colorbar(label="10·log10 PSD (dB re min)")
+    save_plot(fig, os.path.join(plot_dir, f"{channel_name}_spectrogram_mcu.png"), show)
+
+
 def plot_time_overlay(
     time_s: np.ndarray,
     signals: dict[str, np.ndarray],
@@ -553,7 +707,23 @@ def main() -> None:
     parser.add_argument("--output", help="Output CSV path")
     parser.add_argument("--plot-dir", help="Directory for figures")
     parser.add_argument("--no-show", action="store_true", help="Do not open matplotlib windows")
+    parser.add_argument(
+        "--bands-mcu",
+        action="store_true",
+        help="MCU-matched theta/alpha/beta: sliding band power, Welch PSD+shaded bands, spectrogram",
+    )
+    parser.add_argument(
+        "--bands-hop",
+        type=int,
+        default=64,
+        help="Hop (samples) for sliding FFT band time series (default 64)",
+    )
     args = parser.parse_args()
+
+    if args.bands_mcu and args.bands_hop < 1:
+        raise ValueError("--bands-hop must be >= 1")
+    if args.bands_mcu and spectrogram is None:
+        print("Warning: scipy.signal.spectrogram unavailable; spectrogram plots will be skipped.")
 
     channels = select_channels(args)
     if any(ch < 1 or ch > 4 for ch in channels):
@@ -741,6 +911,34 @@ def main() -> None:
                 f"{col}: RAW vs Bandpass vs Wavelet",
                 show_plots,
             )
+
+        if args.bands_mcu:
+            # Uses bp_ch (bandpass+notch when enabled) to align with MCU pipeline before FFT.
+            bp_suffix = (
+                "(bandpass+notch pipeline)"
+                if (use_bandpass and use_notch)
+                else ("(bandpass)" if use_bandpass else "(unfiltered)")
+            )
+            if welch is not None:
+                fw, pw = compute_psd_welch(bp_ch, fs, welch_cfg)
+                plot_welch_psd_with_mcu_bands(fw, pw, col, plot_dir, show_plots, bp_suffix)
+            else:
+                print(f"[{col}] --bands-mcu: Welch PSD skipped (scipy welch missing)")
+            t_b, th, al, be = mcu_sliding_band_powers(bp_ch, fs, MCU_NFFT, args.bands_hop)
+            if len(t_b) > 0:
+                plot_mcu_band_timeseries(t_b, th, al, be, col, plot_dir, show_plots, args.bands_hop)
+            else:
+                print(
+                    f"[{col}] --bands-mcu: band time series skipped "
+                    f"(need >= {MCU_NFFT} samples, got {len(bp_ch)})",
+                )
+            if spectrogram is not None:
+                try:
+                    plot_spectrogram_mcu(bp_ch, fs, col, plot_dir, show_plots)
+                except Exception as exc:
+                    print(f"[{col}] spectrogram failed: {exc}")
+            else:
+                print(f"[{col}] --bands-mcu: spectrogram skipped (scipy spectrogram missing)")
 
     out.to_csv(output_path, index=False)
     print(f"Saved filtered comparison CSV: {output_path}")

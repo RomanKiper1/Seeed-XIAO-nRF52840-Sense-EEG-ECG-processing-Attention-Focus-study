@@ -15,47 +15,52 @@ import sys
 import time
 from collections import deque
 
+import pandas as pd
 import streamlit as st
  
 # ========================== PACKET PROTOCOL ==========================
-# 20-byte binary packet from Seeed:
-#   [0]    0xAA          sync
-#   [1]    0x55          sync
-#   [2:6]  float32 LE    attention (smoothed)
-#   [6:10] float32 LE    alpha power
-#   [10:14] float32 LE   heart rate BPM
-#   [14]   uint8         motor state (0/1)
-#   [15]   uint8         sequence number
-#   [16:18] uint16 LE    checksum (sum of bytes 2..15)
-#   [18]   0x0D          CR
-#   [19]   0x0A          LF
+# 28-byte binary packet from Seeed:
+#   [0]     0xAA          sync
+#   [1]     0x55          sync
+#   [2:6]   float32 LE    attention (smoothed)
+#   [6:10]  float32 LE    alpha power
+#   [10:14] float32 LE    theta power
+#   [14:18] float32 LE    beta power
+#   [18:22] float32 LE    heart rate BPM
+#   [22]    uint8         motor state (0/1)
+#   [23]    uint8         sequence number
+#   [24:26] uint16 LE     checksum (sum of bytes 2..23)
+#   [26]    0x0D          CR
+#   [27]    0x0A          LF
 
 SYNC_BYTE_1 = 0xAA
 SYNC_BYTE_2 = 0x55
-PACKET_SIZE = 20
+PACKET_SIZE = 28
 
 
 def verify_checksum(pkt: bytes) -> bool:
-    expected = sum(pkt[2:16]) & 0xFFFF
-    received = struct.unpack_from('<H', pkt, 16)[0]
+    expected = sum(pkt[2:24]) & 0xFFFF
+    received = struct.unpack_from('<H', pkt, 24)[0]
     return expected == received
 
 
 def parse_packet(pkt: bytes):
-    """Parse a validated 20-byte packet. Returns (attention, alpha, bpm, motor)."""
+    """Parse a validated 28-byte packet. Returns (attention, alpha, theta, beta, bpm, motor, seq)."""
     attention = struct.unpack_from('<f', pkt, 2)[0]
     alpha     = struct.unpack_from('<f', pkt, 6)[0]
-    bpm       = struct.unpack_from('<f', pkt, 10)[0]
-    motor     = pkt[14]
-    seq       = pkt[15]
-    return attention, alpha, bpm, motor, seq
+    theta     = struct.unpack_from('<f', pkt, 10)[0]
+    beta      = struct.unpack_from('<f', pkt, 14)[0]
+    bpm       = struct.unpack_from('<f', pkt, 18)[0]
+    motor     = pkt[22]
+    seq       = pkt[23]
+    return attention, alpha, theta, beta, bpm, motor, seq
 
 
 # ========================== SERIAL RECEIVER ==========================
 
 def read_packet_serial(ser):
     """
-    Block until a valid 20-byte packet is received from the serial port.
+    Block until a valid 28-byte packet is received from the serial port.
     Implements sync-byte hunting to re-align after corruption.
     """
     while True:
@@ -69,8 +74,8 @@ def read_packet_serial(ser):
             continue
         if b2[0] != SYNC_BYTE_2:
             continue
-        rest = ser.read(18)
-        if len(rest) < 18:
+        rest = ser.read(26)
+        if len(rest) < 26:
             continue
         pkt = bytes([SYNC_BYTE_1, SYNC_BYTE_2]) + rest
         if not verify_checksum(pkt):
@@ -176,6 +181,15 @@ with kpi3:
 with kpi4:
     st_motor = st.empty()
 
+# Band power KPI row
+bp1, bp2, bp3 = st.columns(3)
+with bp1:
+    st_theta = st.empty()
+with bp2:
+    st_alpha = st.empty()
+with bp3:
+    st_beta = st.empty()
+
 # Chart row
 col_left, col_right = st.columns(2)
 with col_left:
@@ -184,6 +198,10 @@ with col_left:
 with col_right:
     st.subheader("Heart Rate (BPM)")
     chart_heart = st.empty()
+
+# Band power chart
+st.subheader("Band Powers (Theta / Alpha / Beta)")
+chart_bands = st.empty()
 
 # Status bar
 status_bar = st.empty()
@@ -203,9 +221,50 @@ with st.sidebar:
 
 HISTORY_LEN = 120  # ~2.5 min at 1 packet per 1.28 s
 
+def update_ui(attention, alpha, theta, beta, bpm, motor,
+              attention_history, heart_history,
+              theta_history, alpha_history, beta_history):
+    """Push one packet's worth of data into all dashboard widgets."""
+    attention_history.append(attention)
+    heart_history.append(bpm)
+    theta_history.append(theta)
+    alpha_history.append(alpha)
+    beta_history.append(beta)
+
+    st_attention.metric("ATTENTION INDEX", f"{attention:.2f}",
+                        "Focused" if attention > 0.5 else "Distracted")
+    mental = "RELAXED" if alpha > 5 else "ACTIVE"
+    st_state.metric("MENTAL STATE", mental, f"Alpha: {alpha:.1f}")
+    st_heart.metric("HEART RATE", f"{int(bpm)} BPM")
+    if motor:
+        st_motor.error("MOTOR ACTIVE")
+    else:
+        st_motor.success("MOTOR OFF")
+
+    prev_theta = theta_history[-2] if len(theta_history) > 1 else theta
+    prev_alpha = alpha_history[-2] if len(alpha_history) > 1 else alpha
+    prev_beta  = beta_history[-2]  if len(beta_history) > 1  else beta
+    st_theta.metric("THETA", f"{theta:.1f}", f"{theta - prev_theta:+.1f}")
+    st_alpha.metric("ALPHA", f"{alpha:.1f}", f"{alpha - prev_alpha:+.1f}")
+    st_beta.metric("BETA",  f"{beta:.1f}",  f"{beta - prev_beta:+.1f}")
+
+    chart_attention.line_chart(list(attention_history))
+    chart_heart.line_chart(list(heart_history))
+
+    band_df = pd.DataFrame({
+        "Theta": list(theta_history),
+        "Alpha": list(alpha_history),
+        "Beta":  list(beta_history),
+    })
+    chart_bands.line_chart(band_df)
+
+
 if start_btn:
     attention_history = deque(maxlen=HISTORY_LEN)
     heart_history     = deque(maxlen=HISTORY_LEN)
+    theta_history     = deque(maxlen=HISTORY_LEN)
+    alpha_history     = deque(maxlen=HISTORY_LEN)
+    beta_history      = deque(maxlen=HISTORY_LEN)
     packet_count      = 0
 
     if use_ble:
@@ -214,22 +273,11 @@ if start_btn:
 
             def on_packet(result):
                 global packet_count
-                attention, alpha, bpm, motor, seq = result
+                attention, alpha, theta, beta, bpm, motor, seq = result
                 packet_count += 1
-                attention_history.append(attention)
-                heart_history.append(bpm)
-
-                st_attention.metric("ATTENTION INDEX", f"{attention:.2f}",
-                                    "Focused" if attention > 0.5 else "Distracted")
-                mental = "RELAXED" if alpha > 5 else "ACTIVE"
-                st_state.metric("MENTAL STATE", mental, f"Alpha: {alpha:.1f}")
-                st_heart.metric("HEART RATE", f"{int(bpm)} BPM")
-                if motor:
-                    st_motor.error("MOTOR ACTIVE")
-                else:
-                    st_motor.success("MOTOR OFF")
-                chart_attention.line_chart(list(attention_history))
-                chart_heart.line_chart(list(heart_history))
+                update_ui(attention, alpha, theta, beta, bpm, motor,
+                          attention_history, heart_history,
+                          theta_history, alpha_history, beta_history)
 
             transport = BleTransport(
                 status_callback=lambda msg: status_bar.info(msg)
@@ -251,24 +299,10 @@ if start_btn:
                 result = read_packet_serial(ser)
                 if result is None:
                     continue
-                attention, alpha, bpm, motor, seq = result
-
-
-                attention_history.append(attention)
-                heart_history.append(bpm)
-
-                st_attention.metric("ATTENTION INDEX", f"{attention:.2f}",
-                                    "Focused" if attention > 0.5 else "Distracted")
-                mental = "RELAXED" if alpha > 5 else "ACTIVE"
-                st_state.metric("MENTAL STATE", mental, f"Alpha: {alpha:.1f}")
-                st_heart.metric("HEART RATE", f"{int(bpm)} BPM")
-                if motor:
-                    st_motor.error("MOTOR ACTIVE")
-                else:
-                    st_motor.success("MOTOR OFF")
-
-                chart_attention.line_chart(list(attention_history))
-                chart_heart.line_chart(list(heart_history))
+                attention, alpha, theta, beta, bpm, motor, seq = result
+                update_ui(attention, alpha, theta, beta, bpm, motor,
+                          attention_history, heart_history,
+                          theta_history, alpha_history, beta_history)
 
         except ImportError:
             st.error("Serial mode requires `pyserial`. Install with: pip install pyserial")

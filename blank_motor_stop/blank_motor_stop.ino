@@ -80,7 +80,7 @@ uint8_t seqNum = 0;
 
 BLEService bioService("19B10000-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic bioChar("19B10001-E8F2-537E-4F6C-D104768A1214",
-                          BLERead | BLENotify, 20);
+                          BLERead | BLENotify, 28);
 
 // ========================== DSP FUNCTIONS ==========================
 
@@ -236,25 +236,27 @@ float computeHeartRate() {
 
 // ========================== SERIAL PACKET OUTPUT ===================
 
-void sendPacket(float attention, float alpha, float bpm, uint8_t motorState) {
-    uint8_t pkt[20];
+void sendPacket(float attention, float alpha, float theta, float beta, float bpm, uint8_t motorState) {
+    uint8_t pkt[28];
     pkt[0] = 0xAA;
     pkt[1] = 0x55;
     memcpy(&pkt[2],  &attention, 4);
     memcpy(&pkt[6],  &alpha,     4);
-    memcpy(&pkt[10], &bpm,       4);
-    pkt[14] = motorState;
-    pkt[15] = seqNum++;
+    memcpy(&pkt[10], &theta,     4);
+    memcpy(&pkt[14], &beta,      4);
+    memcpy(&pkt[18], &bpm,       4);
+    pkt[22] = motorState;
+    pkt[23] = seqNum++;
 
     uint16_t cksum = 0;
-    for (int i = 2; i < 16; i++)
+    for (int i = 2; i < 24; i++)
         cksum += pkt[i];
-    memcpy(&pkt[16], &cksum, 2);
+    memcpy(&pkt[24], &cksum, 2);
 
-    pkt[18] = 0x0D;
-    pkt[19] = 0x0A;
-    Serial.write(pkt, 20);
-    bioChar.writeValue(pkt, 20);
+    pkt[26] = 0x0D;
+    pkt[27] = 0x0A;
+    Serial.write(pkt, 28);
+    bioChar.writeValue(pkt, 28);
     Serial.println("[TX] Packet sent via Serial + BLE");
 }
 
@@ -275,10 +277,18 @@ void processBlock() {
     // 4. EMA smoothing
     smoothedAttention = EMA_ALPHA * attention + (1.0f - EMA_ALPHA) * smoothedAttention;
 
-    // 5. Compute alpha power for mental state (re-use last FFT from ch1)
+    // 5. Compute band powers (re-use last FFT from ch1)
+    int thetaLow  = (int)round(4.0  / DF);
+    int thetaHigh = (int)round(8.0  / DF);
+    float thetaPower = bandPower(thetaLow, thetaHigh);
+
     int alphaLow  = (int)round(8.0  / DF);
     int alphaHigh = (int)round(13.0 / DF);
     float alphaPower = bandPower(alphaLow, alphaHigh);
+
+    int betaLow  = (int)round(13.0 / DF);
+    int betaHigh = (int)round(30.0 / DF);
+    float betaPower = bandPower(betaLow, betaHigh);
 
     // 6. ECG heart rate from filteredBuffer[ch2]
     float bpm = computeHeartRate();
@@ -294,7 +304,7 @@ void processBlock() {
     }
 
     // 8. Send packet
-    sendPacket(smoothedAttention, alphaPower, bpm, motorState);
+    sendPacket(smoothedAttention, alphaPower, thetaPower, betaPower, bpm, motorState);
 
     // 9. Reset
     sampleCount = 0;
@@ -321,7 +331,6 @@ void setup() {
     BLE.addService(bioService);
     BLE.advertise();
 
-    BLE.scan();
     BLE.scan();
     Serial.println("[SETUP] BLE init OK, scanning for Ganglion...");
 }
