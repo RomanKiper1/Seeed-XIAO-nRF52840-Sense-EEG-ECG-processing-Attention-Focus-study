@@ -230,13 +230,28 @@ def detect_header(path: str, sep: str) -> bool:
     return False
 
 
+def detect_streamlit_header(path: str, sep: str) -> bool:
+    """Detect Streamlit-generated single-channel dumps (e.g. ',index -- streamlit-generated,value')."""
+    with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            if line.strip():
+                tokens = [t.strip().lower() for t in line.split(sep)]
+                return "value" in tokens and any("streamlit" in tok for tok in tokens)
+    return False
+
+
 def load_table(path: str) -> tuple[pd.DataFrame, str]:
     sep = detect_separator(path)
     has_header = detect_header(path, sep)
-    df = pd.read_csv(path, sep=sep, header=0 if has_header else None)
     if has_header:
+        df = pd.read_csv(path, sep=sep, header=0)
         return df, "stream"
 
+    if detect_streamlit_header(path, sep):
+        df = pd.read_csv(path, sep=sep, header=0)
+        return df, "streamlit"
+
+    df = pd.read_csv(path, sep=sep, header=None)
     if df.shape[1] < 15:
         raise ValueError("Unknown format: expected at least 15 columns for BrainFlow RAW.")
 
@@ -289,6 +304,21 @@ def extract_raw_brainflow(df: pd.DataFrame, channels: list[int]) -> tuple[np.nda
     time_s = df["timestamp"].values - df["timestamp"].values[0]
     channel_cols = [f"eeg{ch}" for ch in channels]
     data = df[channel_cols].reset_index(drop=True)
+    return time_s, data
+
+
+def extract_raw_streamlit(
+    df: pd.DataFrame, channels: list[int], fs: float,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """Streamlit 3-column dumps: a single 'value' column is replicated to ch1..ch4."""
+    value_col = next((c for c in df.columns if str(c).strip().lower() == "value"), None)
+    if value_col is None:
+        raise ValueError("Streamlit format requires a 'value' column.")
+    values = pd.to_numeric(df[value_col], errors="coerce").to_numpy(dtype=np.float64)
+    values = values[~np.isnan(values)]
+    n = len(values)
+    time_s = np.arange(n, dtype=np.float64) / float(fs) if fs > 0 else np.arange(n, dtype=np.float64)
+    data = pd.DataFrame({f"ch{ch}": values.copy() for ch in channels})
     return time_s, data
 
 
@@ -753,6 +783,12 @@ def main() -> None:
     all_chs = sorted(set(channels) | {args.reference_channel} | {args.ecg_nlms_reference})
     if fmt == "stream":
         time_s, selected_raw = extract_raw_stream(df, all_chs)
+    elif fmt == "streamlit":
+        time_s, selected_raw = extract_raw_streamlit(df, all_chs, fs)
+        print(
+            f"Note: Streamlit single-channel dump detected ({len(time_s)} samples); "
+            f"replicated 'value' column to {', '.join(selected_raw.columns)}.",
+        )
     else:
         time_s, selected_raw = extract_raw_brainflow(df, all_chs)
 

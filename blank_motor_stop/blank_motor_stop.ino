@@ -15,7 +15,7 @@ const int    MOTOR_PIN          = 1;
 const int    NUM_CHANNELS       = 4;
 const int    FFT_SIZE           = 256;
 const float  SAMPLING_FREQ      = 200.0f;
-const float  ATTENTION_THRESHOLD = 0.5f;
+const float  ATTENTION_THRESHOLD = 0.35f;
 const float  GANGLION_UV        = 0.001869917138805f;
 const float  DF                 = SAMPLING_FREQ / FFT_SIZE;  // 0.78125 Hz
 
