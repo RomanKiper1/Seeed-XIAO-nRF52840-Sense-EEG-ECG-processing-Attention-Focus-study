@@ -45,6 +45,16 @@ int sampleCount = 0;
 // Accumulated raw values for 19-bit delta decompression
 int32_t last_values[NUM_CHANNELS] = {0, 0, 0, 0};
 
+// ========================== HRV / RMSSD STATE ======================
+// Ring of recent RR-intervals (ms) and global sample counter so that
+// R-peaks detected in different processing blocks share a common timeline.
+const int RMSSD_WINDOW = 16;
+float    rrBuffer[RMSSD_WINDOW] = {0};
+int      rrHead  = 0;
+int      rrCount = 0;
+int32_t  lastPeakGlobalIdx = -1;
+int32_t  globalSampleCount = 0;
+
 // ========================== FFT ====================================
 
 double vReal[FFT_SIZE];
@@ -80,7 +90,7 @@ uint8_t seqNum = 0;
 
 BLEService bioService("19B10000-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic bioChar("19B10001-E8F2-537E-4F6C-D104768A1214",
-                          BLERead | BLENotify, 28);
+                          BLERead | BLENotify, 20);
 
 // ========================== DSP FUNCTIONS ==========================
 
@@ -227,36 +237,109 @@ float computeHeartRate() {
         if (ecgData[i] > ecgThreshold && (i - lastPeakIdx) > ECG_REFRACTORY) {
             peaks++;
             lastPeakIdx = i;
+
+            // Push RR-interval (ms) into circular buffer for RMSSD.
+            int32_t globalIdx = globalSampleCount + i;
+            if (lastPeakGlobalIdx >= 0) {
+                int32_t deltaSamples = globalIdx - lastPeakGlobalIdx;
+                float rrMs = (float)deltaSamples * 1000.0f / SAMPLING_FREQ;
+                // Physiological gate: 30..200 BPM
+                if (rrMs > 300.0f && rrMs < 2000.0f) {
+                    rrBuffer[rrHead] = rrMs;
+                    rrHead = (rrHead + 1) % RMSSD_WINDOW;
+                    if (rrCount < RMSSD_WINDOW) rrCount++;
+                }
+            }
+            lastPeakGlobalIdx = globalIdx;
         }
     }
+
+    globalSampleCount += FFT_SIZE;
 
     float durationSec = (float)FFT_SIZE / SAMPLING_FREQ;
     return (float)peaks * (60.0f / durationSec);
 }
 
-// ========================== SERIAL PACKET OUTPUT ===================
+// RMSSD = sqrt(mean((RR_{n+1} - RR_n)^2)) over recent intervals (ms).
+float computeRMSSD() {
+    if (rrCount < 2) return 0.0f;
+    int start = (rrHead - rrCount + RMSSD_WINDOW) % RMSSD_WINDOW;
+    float sumSq = 0.0f;
+    int n = 0;
+    for (int k = 1; k < rrCount; k++) {
+        int idxA = (start + k - 1) % RMSSD_WINDOW;
+        int idxB = (start + k) % RMSSD_WINDOW;
+        float diff = rrBuffer[idxB] - rrBuffer[idxA];
+        sumSq += diff * diff;
+        n++;
+    }
+    if (n == 0) return 0.0f;
+    return sqrtf(sumSq / (float)n);
+}
 
-void sendPacket(float attention, float alpha, float theta, float beta, float bpm, uint8_t motorState) {
-    uint8_t pkt[28];
+// ========================== PACKET OUTPUT (20-byte) ================
+// 20-byte layout, fits in default ATT MTU=23 notify (MTU-3 = 20):
+//   [0:2]   0xAA 0x55                       sync
+//   [2:6]   float32 LE                      attention (smoothed)
+//   [6:8]   int16  LE  log10(alpha)*2000    alpha bandpower (log domain)
+//   [8:10]  int16  LE  log10(theta)*2000    theta bandpower (log domain)
+//   [10:12] int16  LE  log10(beta)*2000     beta  bandpower (log domain)
+//   [12]    uint8                            heart rate BPM (clamped 0..255)
+//   [13:15] uint16 LE                        RMSSD in ms (clamped 0..65535)
+//   [15]    uint8                            motor state (0/1)
+//   [16]    uint8                            sequence number
+//   [17:19] uint16 LE                        checksum (sum of bytes 2..16)
+//   [19]    0x00                             pad
+//
+// Bandpowers are log-encoded to fit ~10 orders of magnitude in 16 bits;
+// quantization step in log10 is 0.0005  -> ~0.12 % relative error.
+
+static int16_t encodeLog2000(float v) {
+    if (v < 1.0f) v = 1.0f;
+    float lg = log10f(v) * 2000.0f;
+    if (lg >  32767.0f) return  32767;
+    if (lg < -32768.0f) return -32768;
+    return (int16_t)lroundf(lg);
+}
+
+void sendPacket(float attention, float alpha, float theta, float beta,
+                float bpm, float rmssd, uint8_t motorState) {
+    uint8_t pkt[20];
     pkt[0] = 0xAA;
     pkt[1] = 0x55;
-    memcpy(&pkt[2],  &attention, 4);
-    memcpy(&pkt[6],  &alpha,     4);
-    memcpy(&pkt[10], &theta,     4);
-    memcpy(&pkt[14], &beta,      4);
-    memcpy(&pkt[18], &bpm,       4);
-    pkt[22] = motorState;
-    pkt[23] = seqNum++;
+
+    memcpy(&pkt[2], &attention, 4);
+
+    int16_t alphaLog = encodeLog2000(alpha);
+    int16_t thetaLog = encodeLog2000(theta);
+    int16_t betaLog  = encodeLog2000(beta);
+    memcpy(&pkt[6],  &alphaLog, 2);
+    memcpy(&pkt[8],  &thetaLog, 2);
+    memcpy(&pkt[10], &betaLog,  2);
+
+    int bpmI = (int)lroundf(bpm);
+    if (bpmI < 0)   bpmI = 0;
+    if (bpmI > 255) bpmI = 255;
+    pkt[12] = (uint8_t)bpmI;
+
+    int rmssdI = (int)lroundf(rmssd);
+    if (rmssdI < 0)     rmssdI = 0;
+    if (rmssdI > 65535) rmssdI = 65535;
+    uint16_t rmssdU = (uint16_t)rmssdI;
+    memcpy(&pkt[13], &rmssdU, 2);
+
+    pkt[15] = motorState;
+    pkt[16] = seqNum++;
 
     uint16_t cksum = 0;
-    for (int i = 2; i < 24; i++)
+    for (int i = 2; i < 17; i++)
         cksum += pkt[i];
-    memcpy(&pkt[24], &cksum, 2);
+    memcpy(&pkt[17], &cksum, 2);
 
-    pkt[26] = 0x0D;
-    pkt[27] = 0x0A;
-    Serial.write(pkt, 28);
-    bioChar.writeValue(pkt, 28);
+    pkt[19] = 0x00;
+
+    Serial.write(pkt, 20);
+    bioChar.writeValue(pkt, 20);
     Serial.println("[TX] Packet sent via Serial + BLE");
 }
 
@@ -290,8 +373,9 @@ void processBlock() {
     int betaHigh = (int)round(30.0 / DF);
     float betaPower = bandPower(betaLow, betaHigh);
 
-    // 6. ECG heart rate from filteredBuffer[ch2]
-    float bpm = computeHeartRate();
+    // 6. ECG heart rate + RMSSD from filteredBuffer[ch2]
+    float bpm   = computeHeartRate();
+    float rmssd = computeRMSSD();
 
     // 7. Motor control
     uint8_t motorState;
@@ -304,7 +388,8 @@ void processBlock() {
     }
 
     // 8. Send packet
-    sendPacket(smoothedAttention, alphaPower, thetaPower, betaPower, bpm, motorState);
+    sendPacket(smoothedAttention, alphaPower, thetaPower, betaPower,
+               bpm, rmssd, motorState);
 
     // 9. Reset
     sampleCount = 0;
@@ -338,6 +423,7 @@ void setup() {
 // ========================== MAIN LOOP ==============================
 
 void loop() {
+    BLE.poll();   // keep peripheral side (PC) alive even when Ganglion is absent
     BLEDevice peripheral = BLE.available();
     if (peripheral && peripheral.localName().indexOf("Ganglion") >= 0) {
         Serial.println("[BLE] Found Ganglion, stopping scan...");
@@ -357,6 +443,7 @@ void loop() {
                 commandChar.writeValue((byte)'b');
 
                 while (peripheral.connected()) {
+                    BLE.poll();   // service peripheral side (PC connection)
                     if (dataChar.valueUpdated()) {
                         const uint8_t* pkt = dataChar.value();
                         uint8_t packetId = pkt[0];

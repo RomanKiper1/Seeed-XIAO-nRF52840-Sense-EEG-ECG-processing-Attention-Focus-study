@@ -1,5 +1,4 @@
 """
-dashboard_receiver.py
 Lightweight Streamlit dashboard that receives pre-computed biofeedback
 results from Seeed XIAO nRF52840 via Serial USB or BLE.
 No signal processing on PC -- pure visualization.
@@ -13,54 +12,67 @@ import argparse
 import struct
 import sys
 import time
+import csv
+import os
 from collections import deque
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
- 
+
 # ========================== PACKET PROTOCOL ==========================
-# 28-byte binary packet from Seeed:
-#   [0]     0xAA          sync
-#   [1]     0x55          sync
-#   [2:6]   float32 LE    attention (smoothed)
-#   [6:10]  float32 LE    alpha power
-#   [10:14] float32 LE    theta power
-#   [14:18] float32 LE    beta power
-#   [18:22] float32 LE    heart rate BPM
-#   [22]    uint8         motor state (0/1)
-#   [23]    uint8         sequence number
-#   [24:26] uint16 LE     checksum (sum of bytes 2..23)
-#   [26]    0x0D          CR
-#   [27]    0x0A          LF
+# 20-byte binary packet from Seeed (fits in default ATT MTU=23 notify):
+#   [0]      0xAA                   sync
+#   [1]      0x55                   sync
+#   [2:6]    float32 LE             attention (smoothed)
+#   [6:8]    int16   LE             log10(alpha) * 2000
+#   [8:10]   int16   LE             log10(theta) * 2000
+#   [10:12]  int16   LE             log10(beta)  * 2000
+#   [12]     uint8                  heart rate BPM
+#   [13:15]  uint16  LE             RMSSD (ms)
+#   [15]     uint8                  motor state (0/1)
+#   [16]     uint8                  sequence number
+#   [17:19]  uint16  LE             checksum (sum of bytes 2..16)
+#   [19]     0x00                   pad
 
 SYNC_BYTE_1 = 0xAA
 SYNC_BYTE_2 = 0x55
-PACKET_SIZE = 28
+PACKET_SIZE = 20
+
+
+def _decode_log2000(code: int) -> float:
+    """Decode int16 log-domain bandpower back to linear power."""
+    return 10.0 ** (code / 2000.0)
 
 
 def verify_checksum(pkt: bytes) -> bool:
-    expected = sum(pkt[2:24]) & 0xFFFF
-    received = struct.unpack_from('<H', pkt, 24)[0]
+    expected = sum(pkt[2:17]) & 0xFFFF
+    received = struct.unpack_from('<H', pkt, 17)[0]
     return expected == received
 
 
 def parse_packet(pkt: bytes):
-    """Parse a validated 28-byte packet. Returns (attention, alpha, theta, beta, bpm, motor, seq)."""
-    attention = struct.unpack_from('<f', pkt, 2)[0]
-    alpha     = struct.unpack_from('<f', pkt, 6)[0]
-    theta     = struct.unpack_from('<f', pkt, 10)[0]
-    beta      = struct.unpack_from('<f', pkt, 14)[0]
-    bpm       = struct.unpack_from('<f', pkt, 18)[0]
-    motor     = pkt[22]
-    seq       = pkt[23]
-    return attention, alpha, theta, beta, bpm, motor, seq
+    """Parse a validated 20-byte packet.
+    Returns (attention, alpha, theta, beta, bpm, rmssd, motor, seq)."""
+    attention  = struct.unpack_from('<f', pkt, 2)[0]
+    alpha_code = struct.unpack_from('<h', pkt, 6)[0]
+    theta_code = struct.unpack_from('<h', pkt, 8)[0]
+    beta_code  = struct.unpack_from('<h', pkt, 10)[0]
+    alpha = _decode_log2000(alpha_code)
+    theta = _decode_log2000(theta_code)
+    beta  = _decode_log2000(beta_code)
+    bpm   = float(pkt[12])
+    rmssd = float(struct.unpack_from('<H', pkt, 13)[0])
+    motor = pkt[15]
+    seq   = pkt[16]
+    return attention, alpha, theta, beta, bpm, rmssd, motor, seq
 
 
 # ========================== SERIAL RECEIVER ==========================
 
 def read_packet_serial(ser):
     """
-    Block until a valid 28-byte packet is received from the serial port.
+    Block until a valid 32-byte packet is received from the serial port.
     Implements sync-byte hunting to re-align after corruption.
     """
     while True:
@@ -74,8 +86,8 @@ def read_packet_serial(ser):
             continue
         if b2[0] != SYNC_BYTE_2:
             continue
-        rest = ser.read(26)
-        if len(rest) < 26:
+        rest = ser.read(PACKET_SIZE - 2)
+        if len(rest) < PACKET_SIZE - 2:
             continue
         pkt = bytes([SYNC_BYTE_1, SYNC_BYTE_2]) + rest
         if not verify_checksum(pkt):
@@ -122,7 +134,7 @@ class BleTransport:
                     self._status(f"Connected to {device.name} ({device.address})")
                     queue = asyncio.Queue()
 
-                    def _handler(_, data: bytearray):
+                    def handler(_, data: bytearray):
                         if (len(data) == PACKET_SIZE
                                 and data[0] == SYNC_BYTE_1
                                 and data[1] == SYNC_BYTE_2):
@@ -130,7 +142,7 @@ class BleTransport:
                             if verify_checksum(pkt):
                                 queue.put_nowait(parse_packet(pkt))
 
-                    await client.start_notify(self.CHAR_UUID, _handler)
+                    await client.start_notify(self.CHAR_UUID, handler)
 
                     while client.is_connected:
                         result = await asyncio.wait_for(
@@ -167,11 +179,11 @@ st.set_page_config(
 )
 
 st.title("Neuro & Cardio Biofeedback Dashboard")
-st.markdown("Real-time visualization of **EEG attention** and **ECG heart rate** "
-            "processed on Seeed XIAO nRF52840.")
+st.markdown("Real-time visualization of *EEG attention, **ECG heart rate*, "
+            "and *HRV (RMSSD)* processed on Seeed XIAO nRF52840.")
 
 # KPI row
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 with kpi1:
     st_attention = st.empty()
 with kpi2:
@@ -179,6 +191,8 @@ with kpi2:
 with kpi3:
     st_heart = st.empty()
 with kpi4:
+    st_rmssd = st.empty()
+with kpi5:
     st_motor = st.empty()
 
 # Band power KPI row
@@ -196,7 +210,7 @@ with col_left:
     st.subheader("Attention Index")
     chart_attention = st.empty()
 with col_right:
-    st.subheader("Heart Rate (BPM)")
+    st.subheader("Heart Rate (BPM) & HRV (RMSSD, ms)")
     chart_heart = st.empty()
 
 # Band power chart
@@ -211,31 +225,57 @@ with st.sidebar:
     st.header("Connection")
     use_ble = st.checkbox("Use BLE", value=False)
     if use_ble:
-        st.caption(f"Auto-discovers **{BleTransport.DEVICE_NAME}** by name")
+        st.caption(f"Auto-discovers *{BleTransport.DEVICE_NAME}* by name")
     else:
         serial_port = st.text_input("Serial Port", value="COM5")
         baud_rate = st.number_input("Baud Rate", value=115200, step=9600)
+    
+    st.header("Recording")
+    enable_recording = st.checkbox("Enable Recording", value=False)
+    recording_status = st.empty()
+    
     start_btn = st.button("START", type="primary")
+    stop_btn = st.button("STOP", type="secondary")
 
 # ========================== MAIN LOOP ===============================
 
 HISTORY_LEN = 120  # ~2.5 min at 1 packet per 1.28 s
 
-def update_ui(attention, alpha, theta, beta, bpm, motor,
-              attention_history, heart_history,
-              theta_history, alpha_history, beta_history):
+# Recording state
+recording_file = None
+recording_writer = None
+start_time = None
+
+def update_ui(attention, alpha, theta, beta, bpm, rmssd, motor,
+              attention_history, heart_history, rmssd_history,
+              theta_history, alpha_history, beta_history, seq=None):
     """Push one packet's worth of data into all dashboard widgets."""
     attention_history.append(attention)
     heart_history.append(bpm)
+    rmssd_history.append(rmssd)
     theta_history.append(theta)
     alpha_history.append(alpha)
     beta_history.append(beta)
+    
+    # Record data if recording is enabled
+    global recording_file, recording_writer, start_time
+    if enable_recording and recording_writer is not None:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        elapsed = time.time() - start_time if start_time else 0
+        recording_writer.writerow([
+            timestamp, elapsed, seq, attention, alpha, theta, beta, bpm, rmssd, motor
+        ])
+        recording_file.flush()  # Ensure data is written immediately
 
     st_attention.metric("ATTENTION INDEX", f"{attention:.2f}",
-                        "Focused" if attention > 0.5 else "Distracted")
+                         "Focused" if attention > 0.3 else "Distracted")
     mental = "RELAXED" if alpha > 5 else "ACTIVE"
     st_state.metric("MENTAL STATE", mental, f"Alpha: {alpha:.1f}")
     st_heart.metric("HEART RATE", f"{int(bpm)} BPM")
+    if rmssd > 0:
+        st_rmssd.metric("HRV (RMSSD)", f"{rmssd:.1f} ms")
+    else:
+        st_rmssd.metric("HRV (RMSSD)", "— warming up")
     if motor:
         st_motor.error("MOTOR ACTIVE")
     else:
@@ -249,7 +289,12 @@ def update_ui(attention, alpha, theta, beta, bpm, motor,
     st_beta.metric("BETA",  f"{beta:.1f}",  f"{beta - prev_beta:+.1f}")
 
     chart_attention.line_chart(list(attention_history))
-    chart_heart.line_chart(list(heart_history))
+
+    hr_df = pd.DataFrame({
+        "BPM":   list(heart_history),
+        "RMSSD": list(rmssd_history),
+    })
+    chart_heart.line_chart(hr_df)
 
     band_df = pd.DataFrame({
         "Theta": list(theta_history),
@@ -260,8 +305,22 @@ def update_ui(attention, alpha, theta, beta, bpm, motor,
 
 
 if start_btn:
+    # Initialize recording if enabled
+    if enable_recording:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"biofeedback_recording_{timestamp}.csv"
+        recording_file = open(filename, 'w', newline='')
+        recording_writer = csv.writer(recording_file)
+        recording_writer.writerow([
+            'timestamp', 'elapsed_time', 'sequence', 'attention', 'alpha', 'theta', 
+            'beta', 'bpm', 'rmssd', 'motor_state'
+        ])
+        start_time = time.time()
+        recording_status.success(f"Recording to: {filename}")
+    
     attention_history = deque(maxlen=HISTORY_LEN)
     heart_history     = deque(maxlen=HISTORY_LEN)
+    rmssd_history     = deque(maxlen=HISTORY_LEN)
     theta_history     = deque(maxlen=HISTORY_LEN)
     alpha_history     = deque(maxlen=HISTORY_LEN)
     beta_history      = deque(maxlen=HISTORY_LEN)
@@ -273,11 +332,11 @@ if start_btn:
 
             def on_packet(result):
                 global packet_count
-                attention, alpha, theta, beta, bpm, motor, seq = result
+                attention, alpha, theta, beta, bpm, rmssd, motor, seq = result
                 packet_count += 1
-                update_ui(attention, alpha, theta, beta, bpm, motor,
-                          attention_history, heart_history,
-                          theta_history, alpha_history, beta_history)
+                update_ui(attention, alpha, theta, beta, bpm, rmssd, motor,
+                          attention_history, heart_history, rmssd_history,
+                          theta_history, alpha_history, beta_history, seq)
 
             transport = BleTransport(
                 status_callback=lambda msg: status_bar.info(msg)
@@ -285,7 +344,7 @@ if start_btn:
             asyncio.run(transport.stream(on_packet))
 
         except ImportError:
-            st.error("BLE mode requires the `bleak` package. Install with: pip install bleak")
+            st.error("BLE mode requires the bleak package. Install with: pip install bleak")
         except Exception as e:
             st.error(f"BLE error: {e}")
 
@@ -299,12 +358,30 @@ if start_btn:
                 result = read_packet_serial(ser)
                 if result is None:
                     continue
-                attention, alpha, theta, beta, bpm, motor, seq = result
-                update_ui(attention, alpha, theta, beta, bpm, motor,
-                          attention_history, heart_history,
-                          theta_history, alpha_history, beta_history)
+                attention, alpha, theta, beta, bpm, rmssd, motor, seq = result
+                update_ui(attention, alpha, theta, beta, bpm, rmssd, motor,
+                          attention_history, heart_history, rmssd_history,
+                          theta_history, alpha_history, beta_history, seq)
 
         except ImportError:
-            st.error("Serial mode requires `pyserial`. Install with: pip install pyserial")
+            st.error("Serial mode requires pyserial. Install with: pip install pyserial")
         except Exception as e:
             st.error(f"Serial error: {e}")
+    
+    # Close recording file when stopping
+    if recording_file is not None:
+        recording_file.close()
+        recording_status.warning("Recording stopped and file saved")
+        recording_file = None
+        recording_writer = None
+        start_time = None
+
+if stop_btn:
+    # Close recording file if open
+    if recording_file is not None:
+        recording_file.close()
+        recording_status.warning("Recording stopped and file saved")
+        recording_file = None
+        recording_writer = None
+        start_time = None
+    st.rerun()
