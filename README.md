@@ -1,373 +1,167 @@
-# XIAO nRF52840 Sense EEG/ECG Processing (Skeleton)
+# EEG-Based Flow Band
 
-Minimal C++ project skeleton for Seeed XIAO nRF52840 Sense using Arduino (Seeed nRF52 Boards 1.1.12).  
-Focus: clean structure, SOLID-friendly interfaces, and clear extension points for BLE/USB data ingestion, windowed filtering, feature extraction, and attention scoring.
+_A small wearable that listens to your brain and heart, works out when you are focused, and nudges you when your attention drifts._
 
-## Target Hardware
-- MCU: Nordic nRF52840 (ARM Cortex-M4F, 64 MHz)
-- Memory: 256 KB RAM, 1 MB Flash, 2 MB external Flash
-- Connectivity: BLE 5.2 / NFC
+<p align="center">
+  <img src="docs/img/torino_poster.jpg" alt="Team Neurofeedback presenting the EEG-Based Flow Band poster and prototype at Politecnico di Torino" width="420">
+</p>
 
-## Project Structure
-```
-/src
-  main.cpp
-  ble_receiver.cpp
-  ganglion_parser.cpp
-  signal_buffer.cpp
-  filters.cpp
-  features.cpp
-  attention.cpp
-  host_parsers.cpp
-  memory_manager.cpp
-/include
-  ble_receiver.h
-  ganglion_parser.h
-  signal_buffer.h
-  filters.h
-  features.h
-  attention.h
-  host_parsers.h
-  memory_manager.h
-```
+In September 2026 we brought this project to Politecnico di Torino in Italy, where it was selected as a **finalist at the International Biomedical Devices (IBD) Competition 2026**. This page tells the story of how it works and what we found.
 
-## Architecture Diagram (ASCII)
-```
- [BLE/USB] -> [BleReceiver] -> [GanglionPacketParser] -> [SignalBuffer Raw]
-                                                     |
-                                                     +--> [PC Compare Pipeline]
-                                                     |      |- Preprocess (scale+detrend)
-                                                     |      |- Bandpass 1-45 Hz
-                                                     |      |- NLMS / Wavelet / WinsorizedMedian
-                                                     |      |- Plots + PSD Welch + benchmark (95% CI)
-                                                     |
-                                                     +--> [MCU Runtime Pipeline]
-                                                            |- BandpassWindowFilter (1-45 Hz)
-                                                            |- WinsorizedMedianWindowFilter (active)
-                                                            |- NlmsReferenceWindowFilter (stub)
-                                                            |- WaveletSym8WindowFilter (stub)
-                                                            -> [SignalBuffer Filtered] -> [Features] -> [Attention]
+---
 
- MemoryManager -> shared allocation interface for MCU modules
- ECG channel: kECGChannelIndex=2 (channels[2])
-```
+## The idea
 
-## Processing Sequence (ASCII)
-```
-1) Receive raw data (BLE/USB)
-2) Parse to SampleFrame (GanglionPacketParser)
-3) Push to raw buffer
-4) Read window from raw buffer
-5) Bandpass 1-45 Hz (first stage)
-6) Winsorized median (or NLMS/Wavelet when activated)
-7) Push to filtered buffer
-8) Extract features
-9) Update attention score
-```
+Most EEG setups stream raw brain signals to a laptop, and the laptop does all the thinking. We wanted the opposite: a device that does the thinking **itself**, right on the body, and only reports the conclusions.
 
-## Architecture Diagram
-```mermaid
-flowchart LR
-    BleReceiver[BleReceiver] --> Parser[GanglionPacketParser]
-    Parser --> RawBuffer[SignalBufferRaw]
+So the heart of the project is a thumb-sized microcontroller, the **Seeed XIAO nRF52840**. It sits between the sensors and the computer:
 
-    RawBuffer --> PcCompare[PCComparePipeline]
-    PcCompare --> PcPre[PreprocessScaleAndDetrend]
-    PcPre --> PcBP[Bandpass1-45Hz]
-    PcBP --> PcNlms[NLMS]
-    PcBP --> PcWavelet[Wavelet]
-    PcBP --> PcWinsor[WinsorizedMedian]
-    PcNlms --> PcViz[PlotsPSDMetrics]
-    PcWavelet --> PcViz
-    PcWinsor --> PcViz
+1. An **OpenBCI Ganglion** board picks up two channels of EEG from the forehead and one channel of ECG from the chest, 200 times per second.
+2. The Ganglion sends these signals wirelessly to the **XIAO**, which cleans them, analyses them and decides how focused the wearer is. When focus drops, it switches on a small **vibration motor** as a gentle nudge.
+3. Every 1.28 seconds the XIAO sends a short summary (attention, brain rhythms, heart rate, heart-rate variability) wirelessly to a **laptop dashboard**, which simply draws it on screen.
 
-    RawBuffer --> McuBP[BandpassWindowFilter]
-    McuBP --> McuWinsor[WinsorizedMedianActive]
-    McuBP -.-> McuNlms[NlmsReferenceStub]
-    McuBP -.-> McuWavelet[WaveletSym8Stub]
-    McuWinsor --> FilteredBuffer[SignalBufferFiltered]
-    FilteredBuffer --> FeatureExtractor[IFeatureExtractor]
-    FeatureExtractor --> AttentionEngine[AttentionEngine]
+The XIAO is both a listener and a speaker: it _receives_ raw signals from the Ganglion and _transmits_ finished results to the PC. The raw brain data never has to leave the device.
 
-    MemoryManager[MemoryManager] --- McuBP
-```
+- Device code: [blank_motor_stop/blank_motor_stop.ino](blank_motor_stop/blank_motor_stop.ino)
+- Dashboard code: [pc/dashboard_receiver.py](pc/dashboard_receiver.py)
 
-## Pipeline
-1. Input formats: BLE stream from Ganglion (18-bit, 19-bit, raw 24-bit, ASCII/impedance).
-2. Parsing: `GanglionPacketParser` converts packets to `SampleFrame`.
-3. PC preprocessing: scaling to uV (auto/Ganglion) and detrending.
-4. PC Bandpass 1-45 Hz (Butterworth, zero-phase via filtfilt).
-5. PC filter comparison (Bandpass -> NLMS / Wavelet / WinsorizedMedian):
-   - EEG: NLMS reference = ECG channel (eeg3).
-   - ECG: NLMS reference = eeg1 (configurable).
-6. PC outputs: RAW vs Bandpass, Bandpass vs NLMS/Wavelet/Winsor, PSD Welch pipeline, metrics.
-7. MCU runtime:
-   - BandpassWindowFilter (1-45 Hz) first stage.
-   - WinsorizedMedian active; NLMS + Wavelet stubs.
-   - `kECGChannelIndex` (2) for channel-specific logic.
-8. Feature extraction + attention engine on filtered buffer.
+---
 
-## Input / Output Formats
-- MCU input: BLE packets from Ganglion.
-- Host input: CSV, EDF, annotations (.txt/.xml/.json).
-- Additional annotation formats to consider: TSV, EDF+ annotation channel, BDF, EEGLAB `.set`, MNE `.fif`.
+## What happens inside the device
 
-## Processing Sequence
-```mermaid
-flowchart TD
-    step1[1_ReceiveRawData] --> step2[2_ParseToSampleFrame]
-    step2 --> step3[3_PushToRawBuffer]
-    step3 --> step4[4_PCPreprocessScaleDetrend]
-    step4 --> step5[5_PCBandpass1-45Hz]
-    step5 --> step6a[6a_NLMS]
-    step5 --> step6b[6b_Wavelet]
-    step5 --> step6c[6c_WinsorizedMedian]
-    step6a --> step7[7_SavePlotsPSDMetrics]
-    step6b --> step7
-    step6c --> step7
-    step3 --> step8[8_MCUBandpassThenWinsor]
-    step8 --> step9[9_PushToFilteredBuffer]
-    step9 --> step10[10_ExtractFeatures]
-    step10 --> step11[11_UpdateAttentionScore]
-```
+### Holding on to the last moments
 
-## Components
-- `BleReceiver`: transport stub for BLE/USB input; provides raw frames via callback.
-- `GanglionPacketParser`: parses Ganglion BLE packets (18/19-bit, raw, ASCII/impedance).
-- `SignalBuffer`: storage for `SampleFrame` with window reading support.
-- `IWindowFilter`: processes blocks of frames; `DummyWindowFilter` is placeholder.
-- `IFeatureExtractor`: computes features from filtered data.
-- `AttentionEngine`: computes a single attention score from features.
-- `MemoryManager`: centralized allocation/monitoring stub.
-- `HostParsers`: stubs for CSV/EDF/annotation parsing on PC.
+The XIAO keeps two short memories of the last 1.28 seconds (256 samples) for every channel. One stores the signal exactly as it arrived; the other stores the cleaned version. They work like a loop of tape: new samples keep overwriting the oldest ones. Once a fresh window of 256 samples has been collected, the device analyses it.
 
-## Data Model
-`SampleFrame` represents one time point:
-- `channels[0..1]` = EEG (channels 1–2)
-- `channels[2]` = ECG (channel 3)
-- `channels[3]` = reserved/noise (channel 4)
+### Cleaning the signal
 
-## Notes
-- All logic is **stubbed** and must be implemented for real data.
-- Windowed filtering is the default approach (block processing).
-- Design allows exporting both raw and filtered data for storage/visualization/PC transfer.
+EEG is tiny (a few millionths of a volt), so it is easily drowned out by everything else. The device cleans it in three steps:
 
-## Build/Upload
-Use Arduino IDE with **Seeed nRF52 Boards 1.1.12** selected and target **Seeed XIAO nRF52840 Sense**.
+- **Removing the drift.** Sweat and electrode movement make the signal slowly wander up and down. The device subtracts the average of each window to bring it back to zero.
+- **Keeping only the useful range (1–45 Hz).** A band-pass filter cuts out very slow drift below 1 Hz and fast muscle noise above 45 Hz. Brain rhythms that matter for attention all sit in between.
+- **Removing mains hum (50 Hz).** Power lines in the walls produce a strong 50 Hz hum. A narrow notch filter removes exactly that frequency and leaves the rest alone.
 
-## PC Preliminary Processing & Visualization (Python)
+### Listening to the brain's rhythms
 
-### Install dependencies
-```bash
-pip install numpy pandas matplotlib mne PyWavelets scipy
-```
+Next, the device breaks the cleaned signal into its frequencies (a Fourier transform), much like separating a chord into individual notes. It then measures how strong three brain rhythms are:
 
-### CLI User Guide (Git Bash)
-Use these commands from the repository root:
+| Rhythm        | Frequency | What it tends to mean                                                 |
+| ------------- | --------- | --------------------------------------------------------------------- |
+| **Theta (θ)** | 4–8 Hz    | Mental effort and working memory, especially in the front of the head |
+| **Alpha (α)** | 8–13 Hz   | Calm, relaxed wakefulness; grows when you close your eyes             |
+| **Beta (β)**  | 13–30 Hz  | Active, alert thinking                                                |
 
-1) Quick start with bandpass (recommended):
-```bash
-python pc/plot_preliminary.py \
-  --csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv" \
-  --channels 1,2,3 \
-  --reference-channel 3 \
-  --mode compare \
-  --benchmark-runs 20 \
-  --no-show
-```
+From these the device computes an **Attention Index**:
 
-2) Compare without bandpass (legacy):
-```bash
-python pc/plot_preliminary.py \
-  --csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv" \
-  --preset eeg \
-  --reference-channel 3 \
-  --mode compare \
-  --no-bandpass \
-  --no-show
-```
+> **AI = β / (α + θ)**
 
-3) Tune NLMS (more taps and slower adaptation):
-```bash
-python pc/plot_preliminary.py \
-  --csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv" \
-  --channels 1,2 \
-  --reference-channel 3 \
-  --mode nlms \
-  --nlms-taps 24 \
-  --nlms-mu 0.04 \
-  --nlms-delay 2 \
-  --benchmark-runs 30 \
-  --no-show
-```
+It averages the index over both EEG channels and smooths it over time, so a single noisy window cannot flip the result. If the smoothed index drops below 0.35, the vibration motor switches on.
 
-4) Tune wavelet denoising (sym8):
-```bash
-python pc/plot_preliminary.py \
-  --csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv" \
-  --channels 1,2 \
-  --mode wavelet \
-  --wavelet sym8 \
-  --wavelet-level 0 \
-  --wavelet-threshold-scale 1.0 \
-  --benchmark-runs 30 \
-  --no-show
-```
+### Listening to the heart
 
-### Full CLI Flags (what each one does)
-Command:
-```bash
-python pc/plot_preliminary.py [FLAGS]
-```
+The third channel carries the ECG. The device looks for the tall, sharp **R-peaks**, one per heartbeat. A peak only counts if it is taller than 60 % of the strongest peak in the window and at least a third of a second after the previous one (so one beat is never counted twice).
 
-#### Input and channel selection
-- `--csv <path>`  
-  Input CSV/TSV file. Required.  
-  Example: `--csv "Datasets_Ganglion/BrainFlow-RAW_2026-02-01_13-44-55_0.csv"`
+From the beats it calculates:
 
-- `--preset <eeg|ecg|all>`  
-  Quick channel preset:
-  - `eeg` -> channels 1,2
-  - `ecg` -> channel 3
-  - `all` -> channels 1,2,3,4  
-  Default: `eeg`.
+- **Heart rate** in beats per minute.
+- **Heart-rate variability (RMSSD).** This measures how much the gap between consecutive beats changes. A healthy, relaxed heart does _not_ beat like a metronome; small beat-to-beat variations are a sign that the calming (parasympathetic) branch of the nervous system is active. The device only keeps gaps that are physiologically believable (30–200 beats per minute) and remembers the last 16 of them.
 
-- `--channels <list>`  
-  Manual channel override (comma-separated, no spaces), e.g. `1,2` or `1,2,3,4`.  
-  If provided, this overrides `--preset`.
+---
 
-- `--reference-channel <1..4>`  
-  ECG channel (reference for NLMS on EEG channels).  
-  Default: `3`.
+## The dashboard
 
-- `--ecg-nlms-reference <1..4>`  
-  Reference channel for NLMS when processing ECG channel.  
-  Default: `1` (eeg1).
+On the laptop, a small Streamlit app connects to the XIAO, either wirelessly over Bluetooth or through a USB cable. It does no analysis of its own; it simply shows what the device has already worked out:
 
-#### Bandpass
-- `--bandpass-low <float>`  Lower cutoff (Hz). Default: `1.0`.
-- `--bandpass-high <float>` Upper cutoff (Hz). Default: `45.0`.
-- `--bandpass-order <int>` Butterworth order. Default: `4`.
-- `--sampling-rate <float>` Sampling rate (Hz). Default: `200.0`.
-- `--no-bandpass` Disable bandpass filter (legacy behavior).
+- big tiles with the current **attention level** (focused or distracted), **mental state**, **heart rate**, **heart-rate variability** and whether the **motor** is on;
+- the strength of **theta, alpha and beta**, with how much each changed since the last update;
+- live graphs of the last ~2.5 minutes;
+- an optional **recording** button that saves everything to a CSV file for later analysis.
 
-- `--no-notch` Disable 50 Hz notch filter (power line interference removal).  
-  By default, notch is enabled after bandpass.
-- `--notch-freq <float>` Notch center frequency (Hz). Default: `50.0`.
-- `--notch-Q <float>` Notch quality factor (higher = narrower). Default: `30.0`.
+### Quick start guide
 
-#### PSD
-- `--nfft <int>` Welch PSD window size. Default: `512`.
+1. Open `blank_motor_stop/blank_motor_stop.ino` in the Arduino IDE, select the **Seeed XIAO nRF52840** board, install the `ArduinoBLE` and `arduinoFFT` libraries, and upload.
+2. Switch on the OpenBCI Ganglion. The XIAO finds it automatically.
+3. On the laptop:
+   ```bash
+   pip install streamlit pandas pyserial bleak
+   streamlit run pc/dashboard_receiver.py
+   ```
+4. In the sidebar, choose Bluetooth or USB, optionally turn on recording, and press **START**.
 
-#### Filter mode
-- `--mode <compare|nlms|wavelet>`  
-  - `compare`: run both filters and generate all comparison plots
-  - `nlms`: run only NLMS path
-  - `wavelet`: run only Wavelet path  
-  Default: `compare`.
+---
 
-#### Preprocessing
-- `--scale <auto|ganglion|none>`  
-  Controls scaling to microvolts:
-  - `auto`: apply Ganglion factor only when amplitude looks like raw counts
-  - `ganglion`: always apply Ganglion scaling
-  - `none`: keep values unchanged  
-  Default: `auto`.
+## What we found: resting vs. solving maths problems
 
-- `--detrend <none|mean|median>`  
-  Removes DC offset before denoising:
-  - `none`: no DC removal
-  - `mean`: subtract mean
-  - `median`: subtract median (robust to outliers)  
-  Default: `median`.
+### A rough start
 
-#### NLMS parameters
-- `--nlms-taps <int>`  
-  Number of adaptive filter taps (`L`). More taps can model longer ECG leakage paths but increase compute.  
-  Default: `16`.
+Our first recordings were unusable. The signal swung by up to 75,000 µV, while real brain activity is around 50 µV. Loose reference electrodes and poor skin contact were the culprits, and no filter could repair data that had been distorted before it was even recorded. The attention index got stuck at the same value whatever the person was doing.
 
-- `--nlms-mu <float>`  
-  Adaptation step size. Larger values adapt faster but may become unstable/noisy.  
-  Default: `0.06`.
+We fixed it at the source: conductive gel, careful skin preparation, checking every electrode's contact before each session, and asking subjects to sit still with a relaxed jaw. After that, every recorded window was clean.
 
-- `--nlms-eps <float>`  
-  Small stabilizer to avoid divide-by-zero in NLMS normalization.  
-  Default: `1e-6`.
+### The experiment
 
-- `--nlms-delay <int>`  
-  Delays the reference by N samples to better align ECG contamination timing in EEG channels.  
-  Default: `2`.
+Four people were each recorded in two states, about 15–18 minutes each:
 
-#### Wavelet parameters
-- `--wavelet <name>`  
-  Wavelet family/name from PyWavelets, e.g. `sym8`, `db4`, `coif5`.  
-  Default: `sym8`.
+- **Rest:** sitting quietly with eyes closed.
+- **Maths:** solving algebra problems in their head.
 
-- `--wavelet-level <int>`  
-  Decomposition level.  
-  - `0` means auto/max valid level
-  - positive values force a level up to max allowed  
-  Default: `0`.
+We then analysed the recordings with exactly the same settings the device uses, and compared each person **with their own resting baseline**.
 
-- `--wavelet-threshold-scale <float>`  
-  Multiplies wavelet threshold strength:
-  - higher -> stronger denoising, more risk of EEG attenuation
-  - lower -> gentler denoising, more residual artifacts  
-  Default: `1.0`.
+| Subject     | Attention Index at rest | Attention Index during maths | Maths ÷ rest | Theta: maths ÷ rest | Resting heart rate               |
+| ----------- | ----------------------- | ---------------------------- | ------------ | ------------------- | -------------------------------- |
+| S1          | 1.22                    | 0.34                         | 0.28×        | **2.74×**           | 66 bpm                           |
+| S2          | 0.78                    | 0.20                         | 0.26×        | **6.72×**           | 87 bpm\*                         |
+| S3          | 1.61                    | 0.37                         | 0.23×        | **10.77×**          | 61 bpm, **+12 bpm** during maths |
+| S4          | 1.04                    | 0.30                         | 0.28×        | **9.31×**           | 78 bpm, +3 bpm during maths      |
+| **Average** | 1.16                    | 0.30                         | **0.26×**    | 7.4×                | 73 bpm                           |
 
-- `--winsor-clip <float>` Winsor clip factor. Default: `8.0`.
-- `--winsor-kernel <int>` Winsor median kernel size. Default: `7`.
+\* S2's rest session came straight after maths, so their heart had not yet calmed down.
 
-#### Time window
-- `--t-start <float>`  
-  Start time (seconds) for slicing data. Omit for full range.
+![Cross-subject comparison: attention index per state, maths/rest ratio, and theta surge](docs/img/stats_cross_subject.png)
+_Left: each person's attention index at rest and during maths. Middle: how much it dropped. Right: how much theta grew._
 
-- `--t-end <float>`  
-  End time (seconds) for slicing data. Omit for full range.
+### What the numbers tell us
 
-  Example (relaxed state 5–55 s only):  
-  `--t-start 5 --t-end 55`
+**1. Everyone changes by the same proportion.** People start from very different baselines, but during maths every subject's attention index fell to roughly a quarter of their resting value (0.23–0.28×, a spread of only about 9 %). The _relative_ change is what is consistent between people.
 
-#### Benchmark and output
-- `--benchmark-runs <int>`  
-  Repetitions per channel/method for latency/CPU/memory stats and 95% CI.  
-  Default: `20` for typical compare usage (script default is `20`).
+**2. One fixed threshold cannot fit everyone.** S3's resting value (1.61) is twice S2's (0.78). A single cut-off would label S2 as "focused" while they were actually resting. The device needs a short **personal calibration** at the start of each session.
 
-- `--output <path>`  
-  Custom output CSV path. If omitted, auto-generated as `<input>_compare_filters.csv`.
+**3. Theta is the brain's "effort" signal.** In every subject, theta in the front of the head rose sharply during maths, from 2.7 times up to almost 11 times the resting level. This frontal-midline theta is well known in neuroscience as a marker of concentration and working memory. Alpha and beta, by contrast, went up in some people and down in others.
 
-- `--plot-dir <path>`  
-  Custom directory for generated PNG figures and metrics CSV.  
-  If omitted, auto-generated as `<input>_plots`.
+![Maths/rest band-power ratios per subject](docs/img/stats_band_ratios.png)
+_Theta rises for every subject; alpha and beta do not agree with each other._
 
-- `--no-show`  
-  Do not open matplotlib windows (recommended for batch/headless runs).  
-  Figures are still saved to disk.
+**4. The heart tells its own story.** For S3, heart rate climbed from 61 to 74 bpm while solving problems: a clear sign of the body's "get ready" (sympathetic) response to mental stress. S4's heart barely reacted (+3 bpm), even though their brain showed a strong theta surge, so the heart and the brain give two separate views of the same effort. At rest, heart-rate variability was healthy for everyone (69–94 ms), as expected when the calming side of the nervous system is in charge.
 
-#### Quick recommendations
-- First baseline run (full pipeline with bandpass):
-  - `--mode compare --channels 1,2,3 --reference-channel 3 --no-show`
-- If NLMS underperforms:
-  - increase taps (`--nlms-taps 24`), reduce step size (`--nlms-mu 0.03..0.05`)
-- If wavelet over-smooths EEG:
-  - reduce `--wavelet-threshold-scale` (e.g., `0.8`)
+<table>
+  <tr>
+    <td><img src="docs/img/stats_s1_ai_boxplot.png" alt="Subject 1 attention index, rest vs maths"><br><em>S1: attention index at rest versus during maths, on both EEG channels.</em></td>
+    <td><img src="docs/img/stats_s3_bandpower.png" alt="Subject 3 brain rhythm strength, rest vs maths"><br><em>S3: theta grows almost elevenfold during maths.</em></td>
+  </tr>
+  <tr>
+    <td><img src="docs/img/stats_s3_heart_rate.png" alt="Subject 3 heart rate, rest vs maths"><br><em>S3: heart rate rises from 61 to 74 bpm while solving problems.</em></td>
+    <td><img src="docs/img/stats_s4_ai_boxplot.png" alt="Subject 4 attention index by state"><br><em>S4: eyes-open rest, eyes-closed rest, and maths.</em></td>
+  </tr>
+</table>
 
-### Generated Outputs
-- Comparison CSV: `<input>_compare_filters.csv` (raw, bandpass, nlms, wavelet, winsor per channel)
-- Plot directory: `<input>_plots/`
-  - `{channel}_raw_vs_bandpass.png`
-  - `{channel}_raw_vs_nlms.png`, `{channel}_raw_vs_wavelet.png`
-  - `{channel}_raw_nlms_wavelet.png`, `{channel}_nlms_vs_wavelet.png`
-  - `{channel}_pipeline_all.png` (time series: RAW, Bandpass, NLMS, Wavelet, Winsor)
-  - `{channel}_psd_pipeline.png` (Welch PSD overlay per stage)
-  - same set for eeg1, eeg2, eeg3 (ECG) when included in `--channels`
-  - `performance_metrics_ci95.png`, `performance_metrics_ci95.csv`
+### A sanity check: closing the eyes
 
-### Performance Metrics Definition
-- Latency: wall-clock runtime from filter start to filter finish per channel.
-- CPU usage estimate: `process_time / wall_time * 100` per run.
-- Memory usage: `tracemalloc` peak KiB per run.
-- CI: 95% confidence interval computed as `mean +/- 1.96 * std / sqrt(n)`.
-- Big O:
-  - NLMS (`L` taps): time `O(N*L)`, memory `O(L)`.
-  - Wavelet DWT: time `O(N)`, memory `O(N)` for full signal buffers.
+For S4 we split the rest session into an eyes-open half and an eyes-closed half. Almost a hundred years ago Hans Berger noticed that alpha waves grow when people close their eyes. Our device saw the same thing: alpha rose by 35 %. That tells us the system is picking up genuine brain rhythms, not just noise.
+
+![Subject 4 eyes-open vs eyes-closed (Berger effect)](docs/img/stats_s4_berger.png)
+
+All analysis notes and figures are in [Data acquisition and stats/](Data%20acquisition%20and%20stats/).
+
+---
+
+## Finalists in Torino
+
+**Team Neurofeedback**: Roman Kiper · Ibrahim Alabdali · Mostafa Alkousa · Lalith Rahul Murugan Palanisamy
+
+Selected as finalists at the International Biomedical Devices (IBD) Competition 2026, held at Politecnico di Torino on 4 September 2026 and organised by Politecnico di Torino, KTH Royal Institute of Technology and Wrocław University of Science and Technology, with the support of UNITE!
+
+<p align="center">
+  <img src="docs/img/certificate_finalists.png" alt="IBD Competition 2026 Certificate of Finalist, Team Neurofeedback" width="640">
+</p>
+
+Certificate (PDF): [Team Neurofeedback.pdf](Team%20Neurofeedback.pdf)
